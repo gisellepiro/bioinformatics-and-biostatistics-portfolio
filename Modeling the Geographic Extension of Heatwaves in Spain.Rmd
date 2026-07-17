@@ -1,0 +1,892 @@
+---
+title: "Modeling the Geographic Extension of Heatwaves in Spain"
+author: "Giselle Piro Martino"
+date: "2025-11-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = TRUE, warning = TRUE, error = TRUE)
+
+```
+
+```{r}
+require(dplyr)
+require(tidyr)
+require(ggplot2)
+
+```
+
+# Project Overview
+
+This project investigates the factors associated with the geographical extent of heatwaves in Spain between 1975 and 2024 using data published by the Spanish Meteorological Agency (AEMET).
+
+The main objective is to identify which meteorological variables are associated with the number of provinces affected by a heatwave event.
+
+Variables available for each event include:
+
+- Year of occurrence
+- Start and end dates
+- Duration of the heatwave
+- Temperature anomaly
+- Maximum temperature recorded
+- Number of provinces affected
+
+The analysis combines exploratory data analysis, multiple linear regression models, and feature engineering techniques to evaluate the predictors of heatwave geographical impact.
+
+# Data Exploration
+
+```{r Ej1a}
+# Load the dataset
+datos <- load("odc_aemet_1975_2024.RData")
+datos
+
+# Store the table containing the variables of interest
+datos <- tbl
+
+# Display the structure of the dataset
+str(datos)
+
+# Summary statistics for quantitative variables
+summary(datos[, c("a", "duracion", "anomalia", "temp_max", "num_prov")])
+
+# Reproduce Figure 3 from the AEMET report
+
+# Group data by year and calculate:
+# - number of heatwave episodes
+# - total number of heatwave days
+# - maximum heatwave duration
+# Missing years are filled with zeros.
+informe <- datos %>%
+  group_by(a) %>%
+  summarise(
+    num_episodios = n(), # each row corresponds to one heatwave event
+    num_dias = sum(duracion, na.rm = TRUE),
+    durac_max = max(duracion, na.rm = TRUE)
+  ) %>%
+  ungroup() %>%
+  complete(
+    a = 1975:2024,
+    fill = list(
+      num_episodios = 0,
+      num_dias = 0,
+      durac_max = 0
+    )
+  )
+
+# Convert the dataset to long format for plotting
+informe_long <- informe %>%
+  pivot_longer(
+    cols = c(num_episodios, num_dias, durac_max),
+    names_to = "variable",
+    values_to = "valor"
+  )
+
+# Bar plot reproducing Figure 3 from the AEMET report
+ggplot(informe_long, aes(x = a, y = valor, fill = variable)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(
+    values = c(
+      "num_episodios" = "skyblue4",
+      "num_dias" = "darkred",
+      "durac_max" = "yellow"
+    ),
+    labels = c(
+      "num_episodios" = "Number of heatwave events",
+      "num_dias" = "Number of heatwave days",
+      "durac_max" = "Maximum duration"
+    )
+  ) +
+  scale_x_continuous(breaks = seq(1975, 2024, by = 2)) +
+  labs(
+    x = "Year",
+    y = NULL,
+    fill = "Variable",
+    title = "Heatwave events, total heatwave days during summer,\n and duration of the longest heatwave each summer in Spain (1975–2024)"
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1)
+  )
+
+# Scatter plots with regression lines to visually assess potential linear relationships
+
+# Number of affected provinces vs heatwave duration
+ggplot(datos, aes(x = duracion, y = num_prov)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(
+    title = "Number of Affected Provinces vs Heatwave Duration",
+    x = "Duration (days)",
+    y = "Number of Affected Provinces"
+  )
+
+# Number of affected provinces vs temperature anomaly
+ggplot(datos, aes(x = anomalia, y = num_prov)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(
+    title = "Number of Affected Provinces vs Temperature Anomaly",
+    x = "Temperature Anomaly (°C)",
+    y = "Number of Affected Provinces"
+  )
+
+# Number of affected provinces vs maximum temperature
+ggplot(datos, aes(x = temp_max, y = num_prov)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE, color = "red") +
+  labs(
+    title = "Number of Affected Provinces vs Maximum Temperature",
+    x = "Maximum Temperature (°C)",
+    y = "Number of Affected Provinces"
+  )
+
+```
+
+
+The scatter plots suggest that heatwave duration may not exhibit a fully linear relationship with the number of affected provinces. While longer heatwaves tend to affect a larger geographical area, the relationship appears to be relatively weak and may involve non-linear patterns.
+
+In contrast, temperature anomaly shows a clearer positive association with the geographical extension of heatwaves. Higher temperature anomalies appear to be associated with a greater number of affected provinces.
+
+Finally, no obvious linear relationship is observed between the maximum temperature reached during a heatwave and the number of provinces affected.
+
+Although graphical exploration provides an initial understanding of potential trends and associations, visual inspection alone is insufficient to assess the strength and statistical significance of these relationships. Therefore, multiple linear regression models were subsequently fitted to quantify the contribution of each predictor.
+
+Model evaluation focused on the statistical significance of the regression coefficients, assessed through p-values, and on the coefficient of determination ($R^2$), which measures the proportion of variability in the number of affected provinces explained by the predictor variables.
+
+
+
+# Multiple Linear Regression Model
+
+```{r Ej1b}
+
+modelo <- lm(num_prov~a + duracion + anomalia + temp_max, data = datos)
+summary(modelo)
+```
+
+
+### Interpretation of Regression Coefficients
+
+The intercept estimate (45.48) represents the expected number of affected provinces when all predictor variables are equal to zero. Although this scenario is not realistic in practice, the intercept serves as the baseline value of the regression model.
+
+The coefficient associated with **year** indicates a small decrease of approximately **0.026 affected provinces per year**, assuming all other predictors remain constant.
+
+For **heatwave duration**, the model estimates that each additional day of duration is associated with an increase of approximately **one additional affected province**, after adjusting for the remaining variables.
+
+The coefficient for **temperature anomaly** suggests that each additional degree Celsius above the expected average temperature is associated with an increase of approximately **4.38 affected provinces**, holding all other variables constant.
+
+Finally, the coefficient for **maximum temperature** indicates an expected increase of approximately **0.29 affected provinces** for each additional degree Celsius of peak temperature, after controlling for the other predictors.
+
+### Statistical Significance
+
+At a significance level of 0.05, **heatwave duration** and **temperature anomaly** were identified as statistically significant predictors of the geographical extent of heatwaves, with p-values below the significance threshold.
+
+In contrast, **year** and **maximum temperature** were not statistically significant after accounting for the other variables included in the model.
+
+### Model Performance
+
+The model achieved an **R² value of 0.499**, indicating that approximately **49.9% of the variability** in the number of affected provinces can be explained by the predictors included in the model.
+
+The remaining **50.1% of the variability** is likely attributable to factors not captured by the model and to random variation.
+
+The **adjusted R² value of 0.470** accounts for both model fit and model complexity by penalizing predictors that do not contribute meaningful explanatory power. Since the adjusted R² is only slightly lower than the R², the model appears to retain a reasonable explanatory capacity without evidence of substantial overfitting.
+
+
+# Feature Engineering: Adding Month Information
+
+```{r Ej1c}
+
+require(lubridate)
+require(dplyr)
+
+# Create a new categorical variable indicating the month in which
+# the heatwave mainly occurred
+datos <- datos %>%
+  mutate(
+    # Convert start and end dates to Date format
+    fecha_inicio = as.Date(inicio),
+    fecha_fin = as.Date(fin),
+
+    # Calculate the midpoint of each heatwave event
+    punto_medio = fecha_inicio + (fecha_fin - fecha_inicio) / 2,
+
+    # Extract the month corresponding to the midpoint date
+    mes = month(punto_medio, label = TRUE, abbr = FALSE),
+
+    # Recoding months to Spanish
+    mes = recode(mes,
+                 "June" = "junio",
+                 "July" = "julio",
+                 "August" = "agosto",
+                 "September" = "septiembre"),
+    
+    # Convert month into an ordered factor
+    mes = factor(
+      mes,
+      levels = c("June", "July", "August", "September"),
+      ordered = TRUE
+    )
+  )
+
+# Fit an extended multiple linear regression model including month
+modelo_mes <- lm(
+  num_prov ~ a + duracion + anomalia + temp_max + mes,
+  data = datos
+)
+
+# Display model summary
+summary(modelo_mes)
+
+# Compare nested models using ANOVA
+anova(modelo, modelo_mes)
+
+
+```
+
+## Effect of Including Month Information
+
+Adding the categorical variable **month** slightly improved model performance. The coefficient of determination (**R²**) increased from **49.88%** in the baseline model to **52.95%**, indicating that the extended model explained a larger proportion of the variability in the number of affected provinces.
+
+Similarly, the **adjusted R²** increased from **47.02%** to **48.03%**, suggesting that the additional predictor contributed some explanatory information while accounting for model complexity.
+
+However, none of the coefficients associated with the individual month categories were statistically significant at the 5% significance level. Therefore, there is insufficient evidence to conclude that the month in which a heatwave occurs has an independent effect on its geographical extent.
+
+The overall model remained statistically significant, indicating that at least one predictor variable contributes significantly to explaining the number of affected provinces. As in the previous model, **heatwave duration** and **temperature anomaly** remained the only statistically significant predictors and both showed positive associations with the geographical extension of heatwaves.
+
+Finally, the nested ANOVA comparison showed that adding the month variable did not significantly improve model fit. Although a small increase in explanatory power was observed, this improvement was not statistically significant.
+
+
+# Binary Month Variable: July vs Other Months
+
+```{r Ej1d}
+
+require(dplyr)
+
+datos_julio <- datos %>%
+  mutate(
+    julio = ifelse(mes == "julio", 1, 0)
+  )
+
+modelo_julio <- lm(num_prov~a + duracion + anomalia + temp_max + julio, data = datos_julio)
+summary(modelo_julio)
+
+# Compare nested models using ANOVA
+anova(modelo, modelo_julio)
+
+
+```
+
+
+The model including the binary variable **July** explained approximately **52.39% of the variability** in the number of affected provinces.
+
+The estimated coefficient for the July indicator suggests that heatwaves occurring in **July affected approximately three fewer provinces on average** compared with heatwaves occurring in **June, August, and September**, after controlling for the remaining predictors. However, this difference was **not statistically significant** at the 5% significance level.
+
+As in the previous models, **heatwave duration** and **temperature anomaly** remained the only statistically significant predictors, both showing positive associations with the geographical extent of heatwaves.
+
+The overall model remained statistically significant, indicating that at least one predictor variable had a significant effect on the number of affected provinces.
+
+The nested ANOVA comparison showed that introducing the binary July variable did not significantly improve model performance. Although the coefficient of determination (**R²**) increased slightly from **49.88%** to **52.39%**, this improvement was not statistically significant.
+
+
+# Interaction Models
+
+To investigate whether the effects of the quantitative predictors vary depending on whether a heatwave occurred during July or during the rest of the summer months, a more general regression model including interaction terms was considered.
+
+This approach allows the relationship between the meteorological variables and the geographical extent of heatwaves to differ between July and non-July events.
+
+A reduced interaction model was subsequently fitted including only the interaction between **maximum temperature** and the **July indicator variable**. This model was compared with the full interaction model using an appropriate nested model comparison test in order to determine whether the simpler specification provided an adequate fit to the data.
+
+If the reduced model does not perform significantly worse than the full interaction model, it may be preferred because of its greater interpretability and lower complexity.
+
+
+```{r Ej1e}
+
+modelo_interac <- lm(num_prov~julio*(a + duracion + anomalia + temp_max), data = datos_julio)
+
+summary(modelo_interac)
+
+```
+
+The interaction model explains 65.08% of the variability in the response variable (number of affected provinces), indicating a good explanatory capacity. The overall model is statistically significant (p = 7.03 × 10⁻¹²), suggesting that at least one predictor provides relevant information about the response variable.
+
+The statistically significant predictors are:
+
+July as a categorical effect.
+For months other than July, duration, temperature anomaly, and maximum temperature have significant positive effects on the number of affected provinces. Increases in these variables are associated with a larger geographical extent of heat waves.
+During July, year and maximum temperature exhibit significant negative effects, indicating that increases in these variables are associated with fewer affected provinces.
+
+These results suggest that July not only has a direct effect on the number of affected provinces but also modifies the relationship between the quantitative predictors and the geographical extent of heat waves. In other words, the impact of some climatic variables differs between July and the rest of the summer months.
+
+```{r Ej1e2}
+
+modelo_red <- lm(num_prov~a + duracion + anomalia + temp_max*julio, data = datos_julio)
+summary(modelo_red)
+
+# Compare nested models using ANOVA
+anova(modelo_red, modelo_interac)
+```
+
+### Reduced Model Equation
+
+num_prov = β0 + β1·a + β2·duracion + β3·anomalia + β4·temp_max + β5·july + β6·(temp_max × july) + ε
+
+The nested ANOVA test yielded a p-value lower than 0.05, indicating that the full interaction model significantly outperforms the reduced model. Consequently, the reduced specification cannot be considered adequate, as the interaction terms involving July provide additional explanatory power regarding the number of affected provinces.
+
+# Predicción
+
+Using the reduced model obtained in the previous section, we estimated the number of provinces that would be affected by a heatwave lasting 5 days, with a temperature anomaly of 4°C and a maximum temperature of 38°C, occurring in August.
+
+Since the event takes place in August, the binary variable july takes the value 0 in the prediction model.
+
+In addition to the point estimate, a 95% prediction interval was calculated in order to quantify the uncertainty associated with the prediction and to provide a plausible range for the number of affected provinces in a future heatwave event with these characteristics.
+
+```{r Ej1f}
+
+# Generate a prediction for the year 2025. If a generic prediction were required
+# (i.e., not for a specific year), the mean value of variable 'a' could be used instead.
+caso_pred <- data.frame(
+  a = 2025,
+  duracion = 5,
+  anomalia = 4,
+  temp_max = 38,
+  julio = 0
+)
+
+predict(modelo_red, newdata = caso_pred, interval = "prediction", level = 0.95)
+
+```
+
+The estimated number of affected provinces under the specified conditions is 28.45, with a 95% prediction interval of 15.97 to 40.93 provinces.
+
+# Effect of Maximum Temperature and July on the Number of Affected Provinces
+
+To further investigate the role of seasonality, we explored the interaction between maximum temperature and the binary variable indicating whether the heatwave occurred in July or in another summer month.
+
+A graphical representation of this interaction was used to compare the relationship between maximum temperature and the number of affected provinces in July versus the rest of the summer months. The interaction coefficient was interpreted to assess whether the effect of temperature on the geographical extent of heatwaves changes depending on the month in which the event occurs.
+
+The slopes of the fitted regression lines were also examined to quantify these differences and to evaluate whether heatwaves occurring in July follow a different pattern from those taking place in June, August, or September.
+
+```{r Ej1g}
+require(ggplot2)
+
+modelo_tj <- lm(num_prov ~ temp_max * julio, data = datos_julio)
+summary(modelo_tj)
+
+ggplot(data = datos_julio, aes(x = temp_max, y = num_prov, color = factor(julio))) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_color_manual(
+    values = c("0" = "blue", "1" = "red"),
+    labels = c("June, August and September", "July")
+  ) +
+  labs(
+    title = "Relationship Between Maximum Temperature and Number of Affected Provinces",
+    x = "Maximum Temperature (°C)",
+    y = "Number of Affected Provinces",
+    color = "Month Group"
+  )
+
+```
+
+Model equation:
+
+[
+\text{num_prov} = \beta_0 + \beta_1 \cdot \text{temp_max} + \beta_2 \cdot \text{july} + \beta_3 \cdot (\text{temp_max} \times \text{july})
+]
+
+The coefficient associated with the interaction term indicates how the effect of maximum temperature on the number of affected provinces changes during July compared with the other summer months. In other words, it measures the change in the slope of temp_max for heatwaves occurring in July. In this case, the interaction coefficient is negative, suggesting that during July, higher maximum temperatures are associated with a lower number of affected provinces.
+
+For months other than July, the slope associated with temp_max is 2.305, meaning that each additional degree Celsius in maximum temperature is associated with an increase of approximately 2.3 affected provinces.
+
+For July, the slope is obtained by adding the coefficients of temp_max and the interaction term:
+
+[
+\beta_1 + \beta_3 = 2.305 - 2.728 = -0.423
+]
+
+This indicates that, during July, each additional degree Celsius in maximum temperature is associated with a decrease of approximately 0.423 affected provinces.
+
+
+
+# Model refinement and variable transformations
+
+In the previous section, a reduced linear regression model (mod5) was fitted to explain the number of affected provinces (num_prov) using heatwave duration, thermal anomaly, maximum temperature, and the interaction between maximum temperature and the July indicator variable.
+
+The next step of the analysis is to evaluate whether transformations of the predictor variables can improve model performance and explanatory power.
+
+## Transformations of the duration variable
+
+During the exploratory analysis, the scatter plot relating heatwave duration to the number of affected provinces suggested that the relationship might not be strictly linear. Therefore, alternative functional forms for the duration variable were explored.
+
+Two additional models were fitted:
+
+A model replacing duration with its logarithmic transformation, log(duration).
+A model including an additional quadratic term, duration², allowing for a nonlinear relationship between duration and the number of affected provinces.
+
+The objective is to assess whether either transformation provides a better fit than the original linear specification.
+
+```{r Ej2a}
+
+# Logarithmic model
+mod_log <- lm(num_prov~a + log(duracion) + anomalia + temp_max*julio, data = datos_julio)
+summary(mod_log)
+
+# Quadratic model
+mod_quad <- lm(num_prov~a + duracion + I(duracion^2)+ anomalia + temp_max*julio, data = datos_julio)
+summary(mod_quad )
+
+
+```
+
+## Model comparison and goodness-of-fit assessment
+
+The performance of the three candidate models (`mod5`, `mod_log`, and `mod_quad`) was evaluated using several goodness-of-fit indicators in order to identify the specification that best explains the variability in the number of affected provinces.
+
+The comparison focused on metrics such as the coefficient of determination ($R^2$), the adjusted coefficient of determination (Adjusted $R^2$), the residual standard error, and information criteria including AIC and BIC. These indicators allow the assessment of both explanatory power and model complexity, helping to identify the model that provides the best balance between fit and parsimony.
+
+```{r Ej2b}
+
+mod5 <- modelo_red
+
+
+summary(mod5)
+summary(mod_log)
+summary(mod_quad)
+
+
+```
+
+The summaries of the three models indicate that all of them are globally statistically significant, as their overall p-values are below 0.05. Therefore, in each case, at least one predictor contributes significantly to explaining the variability in the response variable.
+
+The coefficient of determination ($R^2$), which measures the proportion of variance explained by the model, follows the pattern:
+
+$$
+\texttt{mod_quad} > \texttt{mod_log} > \texttt{mod5}
+$$
+
+The quadratic model (`mod_quad`) explains 69.26% of the variability in the number of affected provinces, whereas the logarithmic model (`mod_log`) explains 66.45%, and the original model (`mod5`) explains 58.27%.
+
+In all three models, the adjusted $R^2$ values are close to their corresponding $R^2$ values, suggesting that there is no evidence of substantial overfitting.
+
+Regarding individual predictors, all variables except `a` (year) are statistically significant across the three models, indicating that the year variable does not provide relevant information for explaining the variability in `num_prov`.
+
+The Residual Standard Error (RSE), which measures the average deviation of observed values from model predictions, also supports the superiority of the quadratic specification, as lower values indicate better model fit:
+
+$$
+\texttt{mod_quad} ; (5.153) < \texttt{mod_log} ; (5.343) < \texttt{mod5} ; (5.959)
+$$
+
+Overall, these results suggest that the quadratic model (`mod_quad`) provides the best explanatory power among the three candidate models, followed by the logarithmic model (`mod_log`) and finally the original linear specification (`mod5`).
+
+
+## Formal comparison of candidate models
+
+A formal statistical comparison between regression models is only possible when the models are nested, meaning that one model can be obtained from another by adding or removing predictor terms.
+
+Under this criterion, `mod5` and `mod_quad` are nested models because the quadratic model extends the original specification by adding the additional term `duracion²`. Therefore, these two models can be formally compared using an F-test based on the analysis of variance (ANOVA).
+
+The corresponding hypotheses are:
+
+$$
+H_0: \beta_{duracion^2} = 0
+$$
+
+$$
+H_1: \beta_{duracion^2} \neq 0
+$$
+
+Under the null hypothesis, the quadratic term does not improve model fit and the simpler model (`mod5`) is preferred. Under the alternative hypothesis, the quadratic term contributes significantly to explaining the variability in the response variable, favoring `mod_quad`.
+
+The test statistic is the F statistic obtained from the ANOVA comparison between the two nested models.
+
+In contrast, `mod_log` cannot be formally compared with either `mod5` or `mod_quad` using an F-test because the logarithmic transformation replaces the original duration variable rather than extending the existing model structure. Therefore, these models are not nested.
+
+For non-nested models, model selection must rely on goodness-of-fit measures such as $R^2$, adjusted $R^2$, AIC, BIC, or the residual standard error (RSE), rather than formal hypothesis testing.
+
+
+```{r Ej2c}
+
+# Compare nested models using ANOVA
+anova(mod5, mod_quad)
+```
+
+A formal F-test can only be used to compare `mod5` and `mod_quad`, since these are nested models (all predictors included in `mod5` are also present in `mod_quad`). This comparison assumes that the residuals are approximately normally distributed.
+
+The corresponding hypotheses are:
+
+$$
+H_0: \beta_{duration^2} = 0
+$$
+
+The quadratic term does not improve model fit.
+
+$$
+H_1: \beta_{duration^2} \neq 0
+$$
+
+The quadratic term provides additional explanatory power and improves model fit.
+
+The comparison is based on the Fisher F-statistic:
+
+$$
+F = \frac{(RSS_r - RSS_c)/(p_c-p_r)}{RSS_c/df_c}
+$$
+
+where:
+
+* $RSS_r$ is the residual sum of squares of the reduced model.
+
+* $RSS_c$ is the residual sum of squares of the complete model.
+
+* $df_c$ represents the degrees of freedom of the complete model.
+
+* $p_c$ is the number of parameters in the complete model.
+
+* $p_r$ is the number of parameters in the reduced model.
+
+The obtained F-statistic (23.956) is relatively large, and the associated p-value is below 0.05, indicating that the quadratic model provides a significantly better fit than `mod5`. Therefore, there is sufficient evidence to reject the null hypothesis.
+
+This result suggests that including the quadratic term for duration contributes relevant information to the model and improves its explanatory power. Moreover, these findings are consistent with the previous exploratory analysis, which suggested that the relationship between heatwave duration and the number of affected provinces was not entirely linear.
+
+
+## Model Selection
+
+The quadratic model (`mod_quad`) was selected for the subsequent analysis because it showed the best overall performance among the candidate models considered. This decision was based on several model evaluation metrics, including the coefficient of determination ($R^2$), adjusted $R^2$, the residual standard error (RSE), and the ANOVA comparison for nested models.
+
+In particular, `mod_quad` achieved the highest explanatory power for the response variable *number of affected provinces* while maintaining a good balance between model complexity and predictive performance. Furthermore, the ANOVA test provided statistical evidence that including the quadratic term for heatwave duration significantly improves model fit compared with the simpler linear specification.
+
+
+## Ejercicio 3 (25 pt.)
+
+En este ejercicio trabajaremos con el modelo escogido en el ejercicio 2, apartado (d). El objetivo es evaluar si dicho modelo cumple razonablemente los supuestos en los que se basa el modelo lineal.
+
+# Model Diagnostics and Assumption Checking
+
+## Linear regression assumptions
+
+The classical linear regression model relies on several theoretical assumptions derived from the Gauss–Markov theorem:
+
+- Linearity of the parameters.
+
+- Independence of the errors.
+
+- Homoscedasticity (constant variance of the errors).
+
+- Absence of perfect multicollinearity among predictors.
+
+- Zero mean of the errors.
+
+- Normality of the errors.
+
+
+Considering the way the observations were collected, the assumption most likely to be violated is the independence of the errors. Heatwaves occurring in consecutive years may be influenced by common climatic patterns or long-term climate trends, potentially introducing temporal dependence between observations.
+
+In addition, some degree of correlation between predictors may exist. For example, longer heatwaves may also exhibit larger temperature anomalies or higher maximum temperatures. Although moderate multicollinearity does not invalidate the linear model assumptions, it can affect the precision and interpretation of the estimated coefficients.
+
+Among these assumptions, the independence of errors is likely to be the most susceptible to violation due to the way the data were collected. The dataset was generated using information from 137 meteorological stations distributed across Spain. The definition of a heatwave event depends on multiple stations simultaneously exceeding similar temperature thresholds. Based on these observations, the variables used in the analysis, such as the number of affected provinces, duration, maximum temperature, and temperature anomaly, are calculated.
+
+As a consequence, observations associated with the same heatwave event, or with heatwaves occurring close in time, may not be entirely independent. It is therefore possible that the model errors exhibit spatial correlation (between neighbouring provinces) or temporal correlation (between related heatwave events), which would violate the independence assumption required by the classical linear regression model.
+
+
+To evaluate the independence assumption, a residuals versus observation order plot can be inspected to identify potential temporal patterns, and a formal Durbin–Watson test can be performed to assess the presence of autocorrelation in the residuals.
+
+The Durbin–Watson test evaluates the hypotheses:
+
+* $H_0$: the residuals are independent (no autocorrelation).
+* $H_1$: the residuals exhibit autocorrelation.
+
+The test statistic ranges approximately between 0 and 4, with values close to 2 indicating independence of the residuals. Values substantially below 2 suggest positive autocorrelation, whereas values above 2 indicate negative autocorrelation.
+
+If the test fails to reject the null hypothesis ($p > 0.05$), there is no statistical evidence against the independence assumption and the model can be considered to satisfy this condition reasonably well. Conversely, a significant result ($p < 0.05$) would indicate the presence of autocorrelation and therefore a violation of the independence assumption.
+
+Given the temporal nature of heatwave events and their potential dependence across years or neighbouring episodes, this diagnostic is particularly relevant for the present analysis.
+
+
+```{r Ej3b}
+
+# Residuals versus time (year)
+plot(datos$a, residuals(mod_quad),
+     xlab = "Year",
+     ylab = "Residuals",
+     main = "Residuals versus Year")
+abline(h = 0)
+
+# Durbin–Watson test for autocorrelation in residuals
+require(lmtest)
+
+dwtest(mod_quad)
+
+
+```
+
+The residual plot shows that the points are fairly evenly distributed above and below the zero line, with no clear pattern over time. This suggests that the assumption of independence of the errors is reasonably satisfied.
+
+This conclusion is supported by the Durbin–Watson test, which yields a p-value of 0.8542. Therefore, there is insufficient evidence to reject the null hypothesis of independent residuals, indicating that the independence assumption appears to hold for this model.
+
+
+## Validation of Linear Model Assumptions
+
+After selecting the quadratic model as the most appropriate specification, a complete diagnostic analysis was performed to assess whether the assumptions underlying the classical linear regression model were reasonably satisfied.
+
+The evaluation included graphical diagnostics and formal statistical tests for the main assumptions of linear regression: linearity, homoscedasticity, normality of residuals, absence of multicollinearity, and independence of errors. Whenever a potential violation was identified, a minimal and reasonable correction was considered and discussed, although no corrective measures were implemented in the final model.
+
+
+
+```{r Ej 3c}
+require(car)
+
+# Model diagnostics
+
+## Mean of residuals should be approximately zero
+mean(residuals(mod_quad))
+
+## Homoscedasticity
+
+# Residuals versus fitted values plot
+plot(mod_quad, which = 1)
+
+# Scale-location plot
+plot(fitted(mod_quad), sqrt(abs(residuals(mod_quad))),
+     xlab = "Fitted values",
+     ylab = expression(sqrt(abs(hat(epsilon)))),
+     main = "Scale-Location Plot")
+
+# Breusch-Pagan test for homoscedasticity
+bptest(mod_quad)
+
+## Normality
+
+# Normal Q-Q plot
+plot(mod_quad, which = 2)
+
+# Shapiro-Wilk test for normality of residuals
+shapiro.test(residuals(mod_quad))
+
+## Leverage
+
+leverage <- hatvalues(mod_quad)
+leverage
+
+p <- 7 # number of predictors
+n <- nrow(datos_julio) # number of observations
+
+critical_leverage <- 2 * (p + 1) / n
+critical_leverage # observations above this threshold are considered high leverage points
+
+high_leverage <- leverage > critical_leverage
+high_leverage
+
+indices <- which(high_leverage)
+indices
+
+datos_julio[indices, ]
+
+# Plot of leverage values
+upper_limit <- max(leverage) + 0.1
+
+plot(leverage,
+     type = "h",
+     main = "Leverage Values",
+     ylab = "Leverage",
+     ylim = c(0, upper_limit))
+
+abline(h = critical_leverage,
+       col = "red",
+       lty = 2) # red dashed line = critical threshold
+
+# Highlight high leverage observations
+points(which(leverage > critical_leverage),
+       leverage[leverage > critical_leverage],
+       col = "blue",
+       pch = 19)
+
+text(which(leverage > critical_leverage),
+     leverage[leverage > critical_leverage],
+     labels = rownames(datos_julio)[leverage > critical_leverage],
+     pos = 3,
+     cex = 0.8)
+
+# Identify outliers using studentized residuals
+studentized_residuals <- rstudent(mod_quad)
+
+outliers <- which(abs(studentized_residuals) > 2)
+outliers
+
+# Influential observations: large residuals combined with high leverage
+# Cook's distance is used to identify influential observations
+
+cooks <- cooks.distance(mod_quad)
+
+cooks <- cooks[order(cooks, decreasing = TRUE)]
+cooks
+
+cook_threshold <- 4 / (n - p - 1)
+cook_threshold
+
+which(cooks > cook_threshold)
+
+# Diagnostic plots
+plot(mod_quad, which = 4)
+
+plot(mod_quad, which = 5)
+
+## Linearity
+
+# Global linearity assessment
+plot(mod_quad, which = 1)
+
+# Partial residual plots for each predictor
+avPlots(mod_quad)
+
+## Multicollinearity
+
+# Design matrix
+X <- model.matrix(mod_quad)
+
+rank <- qr(X)$rank
+
+# Correlation matrix of predictors
+predictors <- datos_julio[, c("a", "duracion", "anomalia", "temp_max", "julio")]
+
+predictors$duracion2 <- predictors$duracion^2
+predictors$temp_julio <- predictors$temp_max * predictors$julio
+
+round(cor(predictors), 3)
+
+# Variance Inflation Factors
+vif(mod_quad)
+
+# Condition indices
+predictors_scaled <- as.data.frame(scale(predictors,
+                                         center = TRUE,
+                                         scale = TRUE)) # standardize predictors
+
+predictors_scaled$num_prov <- datos_julio$num_prov # add response variable
+
+n <- dim(predictors_scaled)[1] # number of observations
+
+# Linear model with standardized predictors and no intercept
+lmod0 <- lm(num_prov ~ 0 + ., data = predictors_scaled)
+
+# Correlation matrix of predictors
+X <- model.matrix(lmod0) / sqrt(n - 1)
+XtX <- crossprod(X)
+
+lambdas <- eigen(XtX)$values
+vectors <- eigen(XtX)$vectors
+
+round(lambdas, 4)
+
+# Condition index
+kappa(X, exact = TRUE)
+
+# Eigenvector associated with the smallest eigenvalue
+round(vectors[, which.min(lambdas)], 5)
+
+```
+
+## Zero-mean error assumption
+
+The mean of the residuals is 1.38×10−16, which is effectively zero. Therefore, the zero-mean error assumption is satisfied.
+
+Since the model includes an intercept term, this property holds by construction in ordinary least squares regression and does not need to be verified explicitly.
+
+## ZHomoscedasticity
+
+The Residuals vs Fitted plot does not show clear signs of heteroscedasticity such as funnel or fan-shaped patterns. Residuals appear to be randomly scattered around zero with approximately constant variance.
+
+The Scale-Location plot (square root of standardized residuals versus fitted values) confirms this observation, as no systematic increase or decrease in residual variability is detected across the fitted values.
+
+The assumption was formally evaluated using the Breusch-Pagan test. Since the resulting p-value is greater than 0.05, there is insufficient evidence to reject the null hypothesis of constant variance. Therefore, the homoscedasticity assumption appears to hold.
+
+## Normality of residuals
+
+The Q-Q plot suggests that the residuals follow an approximately normal distribution, as most points lie close to the reference line without substantial deviations.
+
+This graphical assessment was confirmed using the Shapiro-Wilk test. With a p-value of 0.9754, there is no evidence to reject the null hypothesis of normality. Therefore, the residuals can be considered approximately normally distributed.
+
+## Leverage points
+
+Leverage values were computed to identify observations with unusual combinations of predictor values and, consequently, a high potential influence on the fitted model.
+
+Two observations exceeded the critical leverage threshold: observations 21 and 29. These cases may have an important influence on the estimated coefficients. However, high leverage alone does not necessarily imply that an observation has a strong impact on the model fit.
+
+## Outliers
+
+Studentized residuals were used to identify potential outliers in the response variable.
+
+Observations 8, 18, 33 and 62 presented absolute studentized residual values greater than 2 and can therefore be considered potential outliers.
+
+## Influential observations
+
+Cook's distance was computed to identify influential observations. Observation 33 presented the largest Cook's distance value, indicating that it is the most influential observation in the dataset.
+
+Additionally, observations 21, 40 and 66 also exceeded the theoretical Cook's distance threshold and may substantially affect the fitted model.
+
+Observation 33 combines a large residual with substantial influence, while observation 21 presents both high leverage and high Cook's distance. These observations deserve further investigation to determine whether they correspond to valid extreme events or to potential measurement or transcription errors.
+
+If data quality issues were detected, a reasonable approach would be to remove the problematic observations, refit the model, and compare the resulting estimates.
+
+## Linearity assumption
+
+The Residuals vs Fitted plot suggests that the overall linearity assumption is reasonably satisfied, as no systematic patterns or strong nonlinear structures are observed.
+
+To assess the linearity of each predictor individually, added-variable plots were generated for all explanatory variables. In all cases, the fitted lines showed approximately linear relationships without clear evidence of curvature or nonlinear effects.
+
+Therefore, the assumption of linearity appears to be acceptable for this model.
+
+## Absence of perfect multicollinearity
+
+The rank of the design matrix equals the number of model parameters (8), indicating that there is no exact multicollinearity among the predictors.
+
+However, practical multicollinearity may still be present. The correlation matrix revealed a very high correlation between duracion and duracion² (0.948), which is expected since the quadratic term is derived directly from the original variable. Similarly, the interaction term temp_julio exhibited an almost perfect correlation with the variable julio (0.999), which is also expected due to the model specification.
+
+Variance Inflation Factors (VIF) confirmed high collinearity levels for duracion, duracion², julio, and temp_julio. Nevertheless, these values are not necessarily problematic because they arise naturally from including polynomial and interaction terms in the model.
+
+Condition indices were also computed to further evaluate multicollinearity. Several small eigenvalues were observed, suggesting near-linear dependencies among predictors. The condition number of 64.94 indicates substantial multicollinearity.
+
+To identify the source of these dependencies, the eigenvector associated with the smallest eigenvalue (λ=0.0006) was examined:
+
+0.00659a−0.00178duracion−0.00378anomalia−0.02114temp_max−0.70497julio+0.00223duracion2+0.70888temp_julio≈0
+
+Since the coefficients associated with a, duracion, anomalia, temp_max, and duracion² are close to zero, the near-linear dependency can be simplified as:
+
+−0.70497⋅julio+0.70888⋅temp_julio≈0
+
+This result indicates that julio and temp_julio are nearly perfectly correlated.
+
+Possible remedies include removing redundant predictors or using alternative regression methods designed to handle multicollinearity, such as ridge regression. However, because the multicollinearity arises from intentionally introduced interaction and polynomial terms, retaining these variables may still be justified for interpretability purposes.
+
+
+## References
+
+- Spanish Meteorological Agency (AEMET). Heatwave report for Spain (1975–2024).
+- <https://www.aemet.es/>
+
+- Wickham H, Grolemund G. *lubridate: Make Dealing with Dates a Little Easier*.
+- <https://cran.r-project.org/package=lubridate>
+
+- RPubs tutorial on `lubridate`.
+- <https://rpubs.com/alcisner/lubridate>
+
+- Stack Overflow discussion on using `ifelse()` inside `mutate()`.
+- <https://stackoverflow.com/questions/61634030/ifelse-in-a-mutate-function-in-r>
+
+- Midway, S. R. Data Analysis in R: A Practical Guide to Statistics.
+- <https://bookdown.org/steve_midway/DAR/the-linear-model.html>
+
+- Refsmmat. Interpreting regressors and interaction terms.
+- <https://www.refsmmat.com/courses/707/lecture-notes/interpreting-regressors.html>
+
+- Faraway JJ. Linear Models with R. 2nd ed. Boca Raton: Chapman & Hall/CRC; 2014.
+- <https://rpubs.com/acastro/regresion_lineal_supuestos>
+
+- The Stats Geek. Mean of residuals in linear regression.
+- <https://thestatsgeek.com/2020/03/23/the-mean-of-residuals-in-linear-regression-is-always-zero/>
+
+- Statology. Identifying influential observations using Cook's distance.
+- <https://www.statology.org/how-to-identify-influential-data-points-using-cooks-distance/>
+
+-James, G., Witten, D., Hastie, T., & Tibshirani, R. An Introduction to Statistical Learning. Springer.
+- <https://www.statlearning.com/>
+Fox, J., & Weisberg, S. An R Companion to Applied Regression. Sage Publications.
