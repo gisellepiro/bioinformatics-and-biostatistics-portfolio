@@ -1,0 +1,1155 @@
+---
+title: "Survival Analysis of HIV Acquisition Risk Factors Using Cox Regression"
+author: "Giselle Piro Martino"
+date: "`r Sys.Date()`"
+output:
+  html_document:
+    toc: true
+    toc_float: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(message = FALSE, warning = FALSE, error = TRUE)
+
+```
+
+
+## Data Preparation and Initial Exploration
+
+The HIV cohort dataset covering the period from 2014 to 2019 was imported into R and subjected to an initial exploratory assessment of the variables included in the study.
+
+
+
+```{r datos, include=FALSE}
+# Load required package
+datos <- readxl::read_xlsx("VIH_Cohort_2014_2019.xlsx")
+
+head(datos)
+str(datos)
+sum(is.na(datos)) # Check for missing values
+
+# Convert categorical variables to factors
+datos$gender <- as.factor(datos$gender)
+datos$age_group <- as.factor(datos$age_group)
+datos$education <- as.factor(datos$education)
+datos$origin <- as.factor(datos$origin)
+datos$casual_partners <- as.factor(datos$casual_partners)
+datos$chemsex <- as.factor(datos$chemsex)
+datos$methamphetamine <- as.factor(datos$methamphetamine)
+datos$ghb <- as.factor(datos$ghb)
+datos$mephedrone <- as.factor(datos$mephedrone)
+
+# Convert event indicator to numeric format for survival modeling
+datos$status <- as.numeric(datos$status)
+
+```
+
+The dataset comprised 9,503 observations and 12 variables, including demographic, behavioral, and clinical characteristics related to HIV acquisition risk.
+
+Data quality checks confirmed the absence of missing values across all variables included in the analysis. Categorical variables were converted to factor format to ensure appropriate handling in descriptive and inferential analyses. In addition, the event indicator variable (`status`) was converted to numeric format to facilitate subsequent fitting of Cox proportional hazards models.
+
+
+## Descriptive Analysis
+
+Descriptive analyses were performed to characterize the study population and explore the distribution of HIV acquisition across demographic and behavioral subgroups.
+
+First, the absolute and relative frequencies of HIV acquisition status were calculated according to participants' region of origin. Subsequently, among individuals who experienced the event during follow-up, the mean time to HIV acquisition was estimated and compared according to chemsex practices.
+
+
+```{r a, include = FALSE}
+
+library(dplyr)
+
+# Absolute and relative frequencies of HIV acquisition status according to origin
+
+tabla_status_origin <- datos %>%
+  group_by(origin, status) %>%
+  summarise(`Frecuencia absoluta` = n(), .groups = "drop") %>%
+  group_by(origin) %>%
+  mutate(`Frecuencia relativa (%)` = round(100 * `Frecuencia absoluta` / sum(`Frecuencia absoluta`), 2))
+
+tabla_status_origin
+
+# Mean time to HIV acquisition among individuals experiencing the event
+
+tabla_media_VIH <- datos %>%
+  filter(status == 1) %>%
+  group_by(chemsex) %>%
+  summarise(
+    N = n(),
+    mean_time_VIH = mean(time, na.rm = TRUE)
+  )
+
+tabla_media_VIH
+
+```
+
+###### Table 1: Distribution of HIV Status According to Region of Origin
+
+```{r a_frec, echo=FALSE}
+
+tabla_status_origin
+
+```
+
+###### Table 2: Mean Time to HIV Acquisition According to Chemsex Practice
+
+```{r a_media, echo=FALSE}
+
+
+tabla_media_VIH
+
+```
+
+Table 1 summarizes the distribution of HIV acquisition status according to participants' region of origin, reporting both absolute and relative frequencies within each group.
+
+Table 2 presents the mean time to HIV acquisition among individuals who experienced the event during follow-up (`status = 1`), stratified according to chemsex practice.
+
+
+## Stratified Cox Proportional Hazards Models
+
+To investigate potential differences according to educational attainment, separate Cox proportional hazards models were fitted for each education level. Each model included gender, region of origin, age group, and chemsex practice as covariates, together with an interaction term between age group and chemsex practice to evaluate whether the effect of chemsex on HIV acquisition varied across age categories.
+
+Hazard ratios (HRs) and their statistical significance were evaluated using a significance level of 5%. Particular attention was given to the effects of gender, region of origin, age group, and the interaction between age and chemsex practice within each educational subgroup.
+
+
+```{r b, include = FALSE}
+library(survival)
+
+# Create three separate datasets, one for each educational level
+# (Primary school, Secondary, and University)
+unique(datos$education)
+
+datos_primary <- subset(datos, education == "Primary school")
+datos_secondary <- subset(datos, education == "Secondary")
+datos_university <- subset(datos, education == "University")
+
+# Cox proportional hazards model for participants with primary education
+modelo_cox_primary <- coxph(
+  Surv(time, status) ~ gender + origin + age_group +
+    chemsex + chemsex:age_group,
+  data = datos_primary
+)
+
+summary(modelo_cox_primary)
+
+# Cox proportional hazards model for participants with secondary education
+modelo_cox_secondary <- coxph(
+  Surv(time, status) ~ gender + origin + age_group +
+    chemsex + chemsex:age_group,
+  data = datos_secondary
+)
+
+summary(modelo_cox_secondary)
+
+# Cox proportional hazards model for participants with university education
+modelo_cox_university <- coxph(
+  Surv(time, status) ~ gender + origin + age_group +
+    chemsex + chemsex:age_group,
+  data = datos_university
+)
+
+summary(modelo_cox_university)
+
+```
+
+###### Hazard Ratios — Primary Education
+
+```{r bHRp, echo =FALSE}
+summary(modelo_cox_primary)$coef[, "exp(coef)"]
+
+```
+
+###### Hazard Ratios — Secondary Education
+
+```{r bHRs, echo=FALSE}
+summary(modelo_cox_secondary)$coef[, "exp(coef)"]
+```
+
+###### Hazard Ratios — University Education
+
+```{r bHRu, echo=FALSE}
+summary(modelo_cox_university)$coef[, "exp(coef)"]
+```
+
+
+
+
+In the primary education subgroup, the Cox model exhibited severe instability, with convergence warnings and extreme coefficient estimates. This was likely due to the small number of observed events (8 events among 277 individuals) relative to the number of model parameters (12 coefficients). Consequently, the resulting estimates were considered unreliable and were not interpreted further.
+
+In the secondary education subgroup, although a convergence warning was observed for the first estimated coefficient (corresponding to the gender variable), the model overall included a sufficient number of events and produced largely stable estimates. Therefore, the results were interpreted with caution. No statistically significant association was observed between gender and the risk of HIV acquisition. Regarding region of origin, participants from Western Europe showed a significantly lower risk of HIV acquisition compared with the reference category (Central and South America), representing the only origin category with a statistically significant association. With respect to age group, individuals aged 35–44 years exhibited a lower risk compared with the reference group (25–34 years). Chemsex practice was associated with a significantly increased risk of HIV acquisition. In addition, a significant interaction between age group and chemsex practice was identified, indicating that the effect of chemsex on HIV acquisition was stronger among individuals younger than 25 years compared with the reference age group (25–34 years).
+
+In the university education subgroup, no evidence of model instability was observed, suggesting more robust parameter estimation. Gender was not significantly associated with the risk of HIV acquisition. Regarding region of origin, participants from Spain exhibited a lower risk compared with the reference category (Central and South America), representing the only statistically significant category within the origin variable. No statistically significant associations were observed between age group and HIV acquisition risk. Chemsex practice remained significantly associated with an increased risk of HIV acquisition. However, no significant interaction between age group and chemsex practice was identified, suggesting a relatively homogeneous effect of chemsex across age groups in this educational subgroup.
+
+
+
+## Interaction Analysis Between Educational Level and Region of Origin
+
+To investigate potential socioeconomic inequalities in HIV acquisition risk, educational attainment was included in the model as a proxy for socioeconomic status. A Cox proportional hazards model was fitted using the full cohort, including educational level, region of origin, the interaction between education and origin, age group, chemsex practice, and the interaction between age group and chemsex practice.
+
+The primary objective of this analysis was to evaluate whether the association between region of origin and HIV acquisition differed across educational levels, as well as to assess potential heterogeneity in the effect of chemsex according to age group.
+
+
+```{r c, include = FALSE}
+require(survival)
+
+
+modelo <- coxph(Surv(time, status) ~ education + origin + origin:education + age_group + chemsex + chemsex:age_group, data = datos)
+
+summary(modelo)
+
+```
+
+```{r crdos, echo=FALSE}
+
+s <- summary(modelo)
+
+interacciones <- s$coef[grepl(":", rownames(s$coef)), ]
+interacciones
+
+```
+
+
+Convergence warnings were observed during model fitting, indicating unstable parameter estimates in some category combinations and suggesting potential separation issues within low-frequency subgroups. This was reflected in extreme hazard ratio estimates for several coefficients, and therefore these associations should be interpreted with caution.
+
+No statistically significant interaction was observed between educational level and region of origin. This finding suggests that the effect of region of origin on the risk of HIV acquisition was relatively consistent across educational groups, providing no evidence of additional inequalities according to educational attainment as a proxy for socioeconomic position.
+
+Nevertheless, several interaction estimates exhibited numerical instability, characterized by very large standard errors and extreme hazard ratio values, again suggesting separation problems in some subgroups. Consequently, the absence of statistical significance should be interpreted cautiously.
+
+A statistically significant interaction was identified between age group and chemsex practice, indicating that the effect of chemsex on HIV acquisition was stronger among individuals younger than 25 years compared with the reference age group (25–34 years). This finding suggests heterogeneity in the effect of chemsex according to age.
+
+
+
+## Extended Cox Model and Baseline Survival Function
+
+The previous Cox proportional hazards model was extended by incorporating the number of casual sexual partners as an additional covariate. The objective was to evaluate whether sexual behavior contributed independently to HIV acquisition risk after adjustment for demographic, socioeconomic, and behavioral factors already included in the model.
+
+Hazard ratios associated with all model covariates were examined to assess their relationship with HIV acquisition risk. In addition, the baseline survival function was estimated and graphically represented to characterize the underlying survival pattern for an individual with reference values for all covariates included in the model.
+
+
+```{r d1, include = FALSE}
+require(survival)
+
+# Cox proportional hazards model
+modelo2 <- coxph(Surv(time, status) ~ education + origin + origin:education + age_group + chemsex + chemsex:age_group + casual_partners, data = datos)
+
+summary(modelo2)
+
+
+# Baseline survival function of the Cox proportional hazards model
+base_surv <- survfit(modelo2)
+```
+
+
+```{r d2, echo = FALSE}
+
+# Plot the estimated baseline survival function
+plot(base_surv,
+     xlab = "Time",
+     ylab = "Baseline survival",
+     main = "Baseline survival function (Cox)")
+
+```
+
+
+
+Convergence warnings were observed during model fitting, likely reflecting separation issues in low-frequency category combinations. These issues resulted in unstable parameter estimates and extreme hazard ratio values accompanied by very wide confidence intervals. Consequently, these estimates should be interpreted with caution.
+
+No evidence of interaction was found between educational level and region of origin, suggesting that the effect of origin on HIV acquisition risk did not vary substantially across educational groups.
+
+Chemsex practice was significantly associated with an increased risk of HIV acquisition (HR = 2.05), indicating a higher hazard among individuals reporting chemsex compared with those who did not engage in chemsex practices.
+
+A significant interaction between age group and chemsex practice was also identified. Specifically, the effect of chemsex on HIV acquisition risk was significantly stronger among individuals younger than 25 years compared with the reference age group (25–34 years). The hazard ratio greater than 1 indicates that individuals younger than 25 years who practiced chemsex experienced a higher risk of HIV acquisition than the reference group.
+
+The number of casual sexual partners was significantly associated with HIV acquisition risk. Compared with the reference category (≥20 partners), all categories showed lower hazards of HIV acquisition, with particularly pronounced effects among individuals reporting fewer partners (for example, 1 partner: HR = 0.18; 2–4 partners: HR = 0.27).
+
+In addition, participants aged 45 years or older exhibited a significantly lower risk of HIV acquisition compared with the reference age group (25–34 years).
+
+### Baseline Survival Function
+
+The baseline survival function represents the estimated probability of remaining event-free over time for an individual with reference values for all covariates included in the model.
+
+Because the model includes multiple covariates and interaction terms, this curve does not represent the marginal survival experience of the study population but rather the baseline survival corresponding to the model reference categories.
+
+A progressive decline in survival probability was observed as follow-up time increased, reflecting the cumulative increase in HIV acquisition risk over time.
+
+As the model included interaction terms, `survfit()` generated a warning indicating that the estimated curve was based on average values of the covariates. Therefore, interpretation of the baseline survival function should be performed with caution.
+
+
+
+## Estimated Survival Functions by Region of Origin
+
+To explore potential differences in HIV acquisition risk according to participants' region of origin, estimated survival functions were derived from the previously fitted Cox proportional hazards model for each origin category while holding the remaining covariates constant at their reference values.
+
+The resulting survival curves allowed comparison of the predicted probability of remaining HIV-free over time across origin groups while accounting for the effects of demographic, socioeconomic, and behavioral covariates included in the model.
+
+```{r e, include=FALSE}
+
+# Define reference covariate values for each origin category
+newdata <- data.frame(
+  education = "Primary school",
+  origin = levels(datos$origin),
+  age_group = "25 to 34",
+  chemsex = "No",
+  casual_partners = ">=20"
+)
+
+
+# Estimate survival functions for each region of origin
+base_surv_orig <- survfit(modelo2, newdata = newdata)
+
+
+```
+
+```{r e_grafico, echo = FALSE}
+
+# Plot estimated survival functions by region of origin
+
+tipos_linea <- 1:length(levels(datos$origin))
+
+plot(base_surv_orig,
+     col = tipos_linea,
+     lty = tipos_linea,      
+     lwd = 2,                
+     xlab = "Time",
+     ylab = "Estimated survival",
+     main = "Estimated survival functions by region of origin (Cox)")
+
+legend("bottomleft",
+       legend = levels(datos$origin),
+       col = tipos_linea,
+       lty = tipos_linea,
+       lwd = 2)
+
+```
+
+
+
+Adjusted survival curves were estimated from the multivariable Cox proportional hazards model. To evaluate the effect of geographic origin, all remaining covariates included in the model were held constant at their reference categories.
+
+However, the Cox model did not identify statistically significant differences according to region of origin, suggesting the absence of an independent association between geographic origin and HIV acquisition risk after adjustment for the remaining covariates. Therefore, the interpretation of the estimated survival curves should be made in light of this finding.
+
+Visual inspection of the adjusted survival curves revealed some differences across origin groups. Participants from the "Other countries" category appeared to experience a steeper decline in survival probability over the follow-up period, indicating a higher estimated risk of HIV acquisition. In contrast, individuals from Eastern and Western Europe exhibited nearly overlapping survival curves that remained close to complete survival throughout follow-up. Spain and Central and South America showed intermediate and relatively similar survival patterns, with high estimated probabilities of remaining event-free over time.
+
+Nevertheless, none of the observed differences between geographic regions and the reference category reached statistical significance in the multivariable model. This suggests that, after controlling for potential confounding factors, geographic origin alone did not constitute an independent and statistically significant predictor of HIV acquisition risk in this cohort.
+
+
+
+## Median Survival Time and One-Year HIV-Free Survival Probability by Region of Origin
+
+Based on the adjusted survival curves obtained from the multivariable Cox proportional hazards model, the median survival time and the probability of remaining HIV-free at one year were estimated for each region of origin.
+
+These measures provide complementary information regarding the temporal dynamics of HIV acquisition risk across geographic subgroups and facilitate comparison of short-term HIV-free survival probabilities between origin categories.
+
+
+###### Median:
+
+```{r fmed, echo=FALSE}
+
+summary(base_surv_orig)$table
+
+```
+
+###### One-Year HIV-Free Survival Probability
+
+```{r fprob, echo =FALSE}
+summary(base_surv_orig, times = 365)
+```
+
+
+The estimated one-year HIV-free survival probabilities derived from the Cox proportional hazards model, while holding all remaining covariates constant, ranged from 0.867 to 1.000 across the different origin groups.
+
+However, it was not possible to estimate the median survival time for any of the subpopulations, as the survival probability did not fall below 50% during the follow-up period in any group.
+
+
+## Reduced Cox Model
+
+A reduced Cox proportional hazards model was derived from the previous multivariable model to obtain a more parsimonious representation of the factors associated with HIV acquisition risk.
+
+Region of origin was retained in the model as the main exposure variable regardless of statistical significance. Additional covariates were retained if they showed statistical significance at the 5% level, together with any statistically significant first-order interaction terms. Following the hierarchical principle, non-significant main effects involved in significant interaction terms were also retained in the final model to preserve model interpretability and validity.
+
+
+```{r g, include = FALSE}
+
+# Full multivariable Cox proportional hazards model
+modelo2 <- coxph(Surv(time, status) ~ education + origin + origin:education + age_group + chemsex + chemsex:age_group + casual_partners, data = datos)
+
+summary(modelo2)
+
+```
+
+```{r gdep, echo = FALSE}
+
+# Reduced Cox proportional hazards model
+modelod <- coxph(Surv(time, status) ~ origin + age_group + chemsex + chemsex:age_group + casual_partners, data = datos)
+
+summary(modelod)
+```
+
+
+## Assessment of the Proportional Hazards Assumption
+
+The proportional hazards assumption was evaluated for each covariate included in the reduced Cox proportional hazards model. Multiple diagnostic approaches were used to assess whether the effect of each predictor remained constant over time.
+
+Model diagnostics focused on identifying potential departures from the proportional hazards assumption and determining whether any model reformulation was required. Where violations were detected, alternative modeling strategies were considered to account for potential time-varying effects.
+
+
+```{r h, fig.width=10, fig.height=6, warning=FALSE, echo = FALSE}
+require(survminer)
+# Graphical assessment of the proportional hazards assumption
+
+## Complementary log-log transformation: -log(-log(S(t)))
+
+### Region of origin
+surv_orig <- survfit(Surv(time, status)~origin, data=datos)
+ggsurvplot(surv_orig, fun = "cloglog", font.legend = 8)
+
+### Age group
+surv_orig <- survfit(Surv(time, status)~age_group, data=datos)
+ggsurvplot(surv_orig, fun = "cloglog", font.legend = 8)
+
+### Chemsex practice
+surv_orig <- survfit(Surv(time, status)~chemsex, data=datos)
+ggsurvplot(surv_orig, fun = "cloglog", font.legend = 8)
+
+### Number of casual sexual partners
+surv_orig <- survfit(Surv(time, status)~casual_partners, data=datos)
+ggsurvplot(surv_orig, fun = "cloglog", font.legend = 8)
+
+
+## Observed versus predicted survival curves
+
+### Predicted survival curves
+modelod
+
+
+### Observed survival curves for region of origin
+newdata <- data.frame(
+  origin = levels(datos$origin),
+  age_group = levels(datos$age_group)[1],
+  chemsex = levels(datos$chemsex)[1],
+  casual_partners = levels(datos$casual_partners)[1]
+)
+
+### Estimate model-based predicted survival curves
+fit_cox <- survfit(modelod, newdata = newdata)
+
+### Observed Kaplan-Meier survival curves by region of origin
+km_origin <- survfit(Surv(time, status) ~ origin, data = datos)
+
+### Plot observed and predicted survival curves
+plot(km_origin,
+     col = 1:5,
+     lwd = 2,
+     xlab = "Follow-up time",
+     ylab = "HIV-free survival probability",
+     main = "Observed vs Predicted Survival Curves")
+
+lines(fit_cox,
+      col = 1:5,
+      lty = 2,
+      lwd = 2)
+
+legend("bottomleft",
+       legend = c("Observed", "Predicted"),
+       lty = c(1,2),
+       lwd = 2)
+
+# Goodness-of-fit assessment
+
+## Harrell and Lee test (Schoenfeld residual-based test)
+### Compute Harrell and Lee test statistic
+test_ph <- cox.zph(modelod, transform = "identity")
+test_ph
+
+### Plot Schoenfeld residuals for region of origin
+plot(test_ph, var="origin")
+abline(h = 0, col = "red", lty = 2)
+
+
+```
+
+```{r h_tt, include = FALSE}
+
+# Assess the proportional hazards assumption using time-dependent covariates
+
+## Dummy variables for region of origin
+## (reference category: Central and South America)
+datos$origin_EE    <- as.numeric(datos$origin == "Eastern Europe")
+datos$origin_other <- as.numeric(datos$origin == "Other countries")
+datos$origin_Spain <- as.numeric(datos$origin == "Spain")
+datos$origin_WE    <- as.numeric(datos$origin == "Western Europe")
+
+## Dummy variables for age group
+## (reference category: 25 to 34 years)
+datos$age_u25   <- as.numeric(datos$age_group == "Under 25 years")
+datos$age_35_44 <- as.numeric(datos$age_group == "35 to 44")
+datos$age_45p   <- as.numeric(datos$age_group == "45 years or older")
+
+## Dummy variables for number of casual sexual partners
+## (reference category: ≥20 partners)
+datos$cp_0     <- as.numeric(datos$casual_partners == "0")
+datos$cp_1     <- as.numeric(datos$casual_partners == "1")
+datos$cp_2_4   <- as.numeric(datos$casual_partners == "2-4")
+datos$cp_5_9   <- as.numeric(datos$casual_partners == "5-9")
+datos$cp_10_19 <- as.numeric(datos$casual_partners == "10-19")
+
+## Binary variable for chemsex practice
+## (reference category: No)
+datos$chemsex_bin <- as.numeric(datos$chemsex == "Yes")
+
+
+# Time-dependent Cox model for region of origin
+modelo_tt_origin <- coxph(
+  Surv(time, status) ~ origin + age_group + chemsex + chemsex:age_group + casual_partners +
+    tt(origin_EE) + tt(origin_other) + tt(origin_Spain) + tt(origin_WE),
+  data = datos,
+  tt = function(x, t, ...) x * log(t)
+)
+
+summary(modelo_tt_origin)
+
+# Time-dependent Cox model for age group
+modelo_tt_age <- coxph(
+  Surv(time, status) ~ origin + age_group + chemsex + chemsex:age_group + casual_partners +
+    tt(age_u25) + tt(age_35_44) + tt(age_45p),
+  data = datos,
+  tt = function(x, t, ...) x * log(t)
+)
+
+summary(modelo_tt_age)
+
+# Time-dependent Cox model for chemsex practice
+modelo_tt_chemsex <- coxph(
+  Surv(time, status) ~ origin + age_group + chemsex + chemsex:age_group + casual_partners +
+    tt(chemsex_bin),
+  data = datos,
+  tt = function(x, t, ...) x * log(t)
+)
+
+summary(modelo_tt_chemsex)
+
+# Time-dependent Cox model for number of casual sexual partners
+modelo_tt_cp <- coxph(
+  Surv(time, status) ~ origin + age_group + chemsex + chemsex:age_group + casual_partners +
+    tt(cp_0) + tt(cp_1) + tt(cp_2_4) + tt(cp_5_9) + tt(cp_10_19),
+  data = datos,
+  tt = function(x, t, ...) x * log(t)
+)
+
+summary(modelo_tt_cp)
+
+```
+
+The proportional hazards assumption was initially evaluated through visual inspection of Kaplan–Meier survival curves stratified by covariate levels and transformed using the complementary log-log scale, −log(−log(S(t))).
+
+Visual assessment of the transformed curves revealed an overall pattern of approximately parallel trajectories across covariate categories, although occasional crossings were observed during specific follow-up intervals. These crossings did not appear systematic and therefore did not suggest any meaningful violation of the proportional hazards assumption.
+
+Comparison between observed Kaplan–Meier survival curves and model-predicted survival curves indicated an adequate fit of the Cox model. Overall, the predicted curves reproduced the general pattern of the empirical survival functions across the different origin categories, with only minor discrepancies that did not appear systematic.
+
+The Harrell and Lee test, based on Schoenfeld residuals, was subsequently performed. No statistically significant evidence was found to reject the null hypothesis of proportional hazards for any individual covariate or for the interaction between age group and chemsex practice, with all p-values exceeding 0.05. Furthermore, the global test provided no evidence against the proportional hazards assumption for the model as a whole.
+
+Graphical inspection of Schoenfeld residuals for the origin variable revealed some deviations from the reference line during the early follow-up period (approximately the first 250 days), where the smoothed residual curve temporarily moved outside the 95% confidence bands. Beyond this interval, the residual trajectory stabilized and remained approximately horizontal throughout the remainder of the follow-up period (up to approximately 2000 days), which is compatible with the proportional hazards assumption during most of the observation period.
+
+As a representative example, graphical residual diagnostics for the origin variable are presented.
+
+As an additional assessment, time-dependent effects were evaluated using the `tt()` function from the `survival` package, which incorporates interaction terms of the form `x × log(time)` into the Cox model. Because all covariates included in the model were categorical, they could not be directly incorporated into the `tt()` function in their original form, as the method requires numerical variables. Therefore, categorical variables were first recoded into dummy variables prior to model fitting.
+
+None of the four extended models incorporating time-dependent effects showed statistically significant `tt()` terms (all p-values > 0.05), indicating no evidence that the effects of the covariates varied over time.
+
+These findings are consistent with the results obtained using the previous diagnostic approaches and reinforce the conclusion that the proportional hazards assumption was reasonably satisfied for all covariates included in the model.
+
+
+
+## Parametric Survival Modeling
+
+In addition to the semi-parametric Cox proportional hazards model, a parametric survival model was fitted to evaluate the association between demographic and behavioral factors and HIV acquisition risk under a fully specified baseline hazard function.
+
+A Weibull model was initially considered because of its flexibility in accommodating increasing or decreasing hazard rates over time. If model diagnostics suggested a constant hazard over time, an exponential model was considered as an alternative special case of the Weibull distribution.
+
+The model included the following covariates as main effects only: gender, age group, educational level, region of origin, number of casual sexual partners, methamphetamine use, GHB use, and mephedrone use. No interaction terms were included in this analysis.
+
+Parameter estimates and hazard ratios were interpreted to assess the independent contribution of each covariate to HIV acquisition risk within the parametric modeling framework.
+
+
+```{r i, include = FALSE}
+library(SurvRegCensCov)
+
+# Weibull model
+modelo_weibull <- WeibullReg(
+  Surv(time, status) ~ gender + age_group + education + origin + 
+    casual_partners + methamphetamine + ghb + mephedrone,
+  data = datos
+)
+modelo_weibull
+
+
+# Exponential model
+modelo_exp <- survreg(
+  Surv(time, status) ~ gender + age_group + education + origin + 
+    casual_partners + methamphetamine + ghb + mephedrone,
+  data = datos,
+  dist = "exponential"
+)
+
+summary(modelo_exp)
+
+```
+
+```{r irdos, echo = FALSE}
+# HR, ICs and p-values
+sum_exp <- summary(modelo_exp)
+coefs <- sum_exp$table
+
+hr <- exp(-coefs[, "Value"])
+lb <- exp(-coefs[, "Value"] - 1.96 * coefs[, "Std. Error"])
+ub <- exp(-coefs[, "Value"] + 1.96 * coefs[, "Std. Error"])
+
+data.frame(HR = round(hr, 3), LB = round(lb, 3), UB = round(ub, 3), 
+           p = round(coefs[, "p"], 4))
+```
+
+
+
+
+The estimated Weibull scale parameter was close to 1, suggesting an approximately constant hazard function over time. Therefore, the exponential model was considered an appropriate and more parsimonious alternative.
+
+The exponential model was statistically significant overall (χ² = 212.49, 18 degrees of freedom, p = 3.1 × 10⁻³⁵), indicating that the set of covariates provided significant information for modeling time to HIV acquisition.
+
+The covariates showing statistically significant associations (p < 0.05) were as follows:
+
+* **Age group:** Individuals aged 45 years or older exhibited an approximately 37% lower risk of HIV acquisition (HR = 0.631) compared with the reference group (25–34 years).
+
+* **Region of origin:** Participants from Spain had a 33% lower risk of HIV acquisition (HR = 0.673) compared with individuals from Central and South America.
+
+* **Number of casual sexual partners:** All categories with fewer than 20 casual partners were associated with a lower risk of HIV acquisition (HR < 1). The category reporting a single casual partner exhibited the strongest protective association (HR = 0.178), corresponding to an approximately 82% reduction in risk compared with the reference category (≥20 casual partners).
+
+* **Methamphetamine use:** With an estimated HR of 62.3, methamphetamine use was associated with an approximately 62-fold increase in the risk of HIV acquisition, representing the strongest predictor in the model. However, given the extremely large effect size and the likely presence of wide confidence intervals, this estimate should be interpreted with caution.
+
+* **GHB use:** GHB consumption was associated with an almost threefold increase in HIV acquisition risk (HR = 2.80).
+
+* **Mephedrone use:** According to the fitted model, mephedrone use appeared to be associated with a 97% reduction in HIV acquisition risk (HR = 0.026). However, this result should be interpreted cautiously. A protective effect of this magnitude is biologically implausible and likely reflects collinearity with methamphetamine use, as both substances are commonly consumed together in chemsex settings. In the presence of methamphetamine in the model, the estimated effect of mephedrone may therefore be distorted. Additional analyses evaluating the correlation structure between these variables and the appropriateness of including both covariates simultaneously would be advisable.
+
+
+
+## Reduced Parametric Survival Model
+
+A reduced parametric survival model was derived from the previous multivariable model in order to obtain a more parsimonious representation of the factors associated with HIV acquisition risk.
+
+Region of origin was retained in the model as the primary exposure variable irrespective of statistical significance. Additional covariates were retained if they showed statistical significance at the 5% level in the full model. The resulting reduced model was subsequently interpreted in terms of the estimated hazard ratios associated with each retained covariate.
+
+
+```{r j, include=FALSE}
+
+modelo_j <- survreg(
+  Surv(time, status) ~ origin + age_group + casual_partners + methamphetamine + ghb + mephedrone,
+  data = datos,
+  dist = "exponential"
+)
+
+summary(modelo_j)
+
+# HR, ICs and p-values
+sum_i <- summary(modelo_j)
+coefs <- sum_i$table
+
+hr <- exp(-coefs[, "Value"])
+lb <- exp(-coefs[, "Value"] - 1.96 * coefs[, "Std. Error"])
+ub <- exp(-coefs[, "Value"] + 1.96 * coefs[, "Std. Error"])
+
+
+```
+
+```{r j_HR, echo = FALSE}
+
+data.frame(HR = round(hr, 3), LB = round(lb, 3), UB = round(ub, 3),
+           p = round(coefs[, "p"], 4))
+```
+
+
+A reduced exponential survival model was fitted including region of origin as the exposure variable together with those covariates showing evidence of a statistically significant association (p < 0.05) in the previous model.
+
+The model was globally significant (χ² = 208.11, 15 degrees of freedom, p < 2 × 10⁻¹⁶), indicating that the selected covariates contributed significantly to explaining the risk of HIV acquisition.
+
+The statistically significant covariates (p < 0.05) were as follows:
+
+* **Region of origin:** Participants from Spain exhibited a 31% lower risk of HIV acquisition (HR = 0.693) compared with individuals from Central and South America, the reference category, after adjustment for the remaining covariates included in the model. The remaining origin categories (Eastern Europe, Other countries, and Western Europe) did not differ significantly from the reference group.
+
+* **Age group:** Individuals aged 45 years or older showed a 37% lower risk of HIV acquisition compared with the reference age group of 25–34 years (HR = 0.629).
+
+* **Number of casual sexual partners:** All categories corresponding to fewer than 20 casual partners were associated with a lower risk of HIV acquisition (HR < 1). The strongest association was observed for individuals reporting a single casual partner (HR = 0.181), corresponding to an approximately 82% reduction in risk relative to the reference category (≥20 casual partners).
+
+* **Methamphetamine use:** Methamphetamine consumption was associated with an approximately 60-fold increase in HIV acquisition risk (HR = 60.517), representing the strongest predictor in the model. However, this estimate may be affected by substantial variability and should therefore be interpreted cautiously.
+
+* **GHB use:** GHB consumption was associated with an almost threefold increase in HIV acquisition risk (HR = 2.874).
+
+* **Mephedrone use:** The model estimated an HR of 0.027, suggesting an apparent 97% reduction in HIV acquisition risk. However, as discussed previously, such a protective effect is biologically implausible and likely reflects a statistical artifact arising from collinearity, given that mephedrone and methamphetamine are frequently consumed together in chemsex settings.
+
+
+
+#### References
+
+* Therneau, T. (2024). coxph: Fit proportional hazards regression model. RDocumentation.
+<https://www.rdocumentation.org/packages/survival/versions/3.8-3/topics/coxph>
+
+* Dinesh Kumar. (s. f.). Survival analysis: Cox proportional hazards regression. RPubs.
+<https://rpubs.com/dinesh_km/survival-analysis-cox-proportional-hazards-regression>
+
+* Signorelli, M., & Fiocco, M. (s. f.). How to use the Landmarking package. CRAN.
+<https://cran.r-project.org/web/packages/Landmarking/vignettes/how_to_use.html>
+
+* Therneau, T. M., & Grambsch, P. M. (s. f.). A package for survival analysis in R: survival vignette. CRAN. <https://cran.r-project.org/web/packages/survival/vignettes/survival.pdf>
+
+* Sthda. (s. f.). Cox proportional hazards model. <https://www.sthda.com/english/wiki/cox-proportional-hazards-model>
+
+* Kassambara, A., & Kosinski, M. (s. f.). surv_median: Compute survival median from survival curves. RDocumentation. <https://www.rdocumentation.org/packages/survminer/versions/0.5.2/topics/surv_median>
+
+* Sestelo, M. (s. f.). How to evaluate the PH assumption. Bookdown. <https://bookdown.org/sestelo/sa_financial/how-to-evaluate-the-ph-assumption.html>
+
+* Therneau, T. M. (2024). survival: Survival analysis (R package version documentation). CRAN. <https://cran.r-project.org/web/packages/survival/refman/survival.html>
+
+* Muenchen, R. A. (2024). rms: Regression modeling strategies. CRAN. <https://cran.r-project.org/web/packages/rms/rms.pdf>
+
+* Harrell, F. E. (s. f.). Cox regression case studies. Hbiostat. <https://hbiostat.org/rmsc/coxcase>
+
+* Therneau, T. M., & Grambsch, P. M. (s. f.). Time-dependent covariates in Cox models (vignette). <https://cran.r-project.org/web/packages/survival/vignettes/timedep.pdf>
+
+* Stack Overflow. (n. d.). Warning: loglik converged before variable. <https://stackoverflow.com/questions/19369314/r-coxph-warning-loglik-converged-before-variable>
+
+* Stack Overflow. (n. d.). Time-dependent coefficient for categorical covariate in Cox model. <https://stackoverflow.com/questions/78880239/how-to-include-a-time-dependent-coefficient-for-a-categorical-covariate-in-a-cox>
+
+* Hubeaux, S., & Rufibach, K. (2014). Weibull regression for survival data (SurvRegCensCov vignette). CRAN. <https://cran.rediris.es/web/packages/SurvRegCensCov/vignettes/weibull.pdf>
+
+* Haile, S. R. (2024). WeibullReg: Weibull regression for survival data. R package documentation. <https://www.rdocumentation.org/packages/SurvRegCensCov/versions/1.8/topics/WeibullReg>
+
+
+#### Apendix
+
+##### Dataset Preparation
+
+```{r a_datos}
+# Load the dataset and perform an initial exploration
+datos <- readxl::read_xlsx("VIH_Cohort_2014_2019.xlsx")
+
+head(datos)
+str(datos)
+sum(is.na(datos)) # No missing values
+
+# Convert the corresponding variables to factors
+datos$gender <- as.factor(datos$gender)
+datos$age_group <- as.factor(datos$age_group)
+datos$education <- as.factor(datos$education)
+datos$origin <- as.factor(datos$origin)
+datos$casual_partners <- as.factor(datos$casual_partners)
+datos$chemsex <- as.factor(datos$chemsex)
+datos$methamphetamine <- as.factor(datos$methamphetamine)
+datos$ghb <- as.factor(datos$ghb)
+datos$mephedrone <- as.factor(datos$mephedrone)
+
+# Convert status to numeric for subsequent Cox model fitting
+datos$status <- as.numeric(datos$status)
+
+```
+
+##### Descriptive Analysis
+
+```{r a_a}
+
+library(dplyr)
+
+# Absolute and relative frequency of status according to region of origin
+tabla_status_origin <- datos %>%
+  group_by(origin, status) %>%
+  summarise(`Frecuencia absoluta` = n(), .groups = "drop") %>%
+  group_by(origin) %>%
+  mutate(`Frecuencia relativa (%)` = round(100 * `Frecuencia absoluta` / sum(`Frecuencia absoluta`), 2))
+
+tabla_status_origin
+
+# Mean time to HIV acquisition among individuals who experienced the event
+# (including N for easier interpretation)
+tabla_media_VIH <- datos %>%
+  filter(status == 1) %>%
+  group_by(chemsex) %>%
+  summarise(
+    N = n(),
+    mean_time_VIH = mean(time, na.rm = TRUE)
+  )
+
+tabla_media_VIH
+
+```
+
+
+##### Stratified Cox Proportional Hazards Models
+
+```{r a_b}
+library(survival)
+
+# Create separate datasets for each educational level
+# (Primary school, Secondary, and University)
+
+unique(datos$education)
+
+datos_primary <- subset(datos, education == "Primary school")
+datos_secondary <- subset(datos, education == "Secondary")
+datos_university <- subset(datos, education == "University")
+
+# Cox proportional hazards model for participants with primary education
+modelo_cox_primary <- coxph(
+  Surv(time, status) ~ gender + origin + age_group +
+    chemsex + chemsex:age_group,
+  data = datos_primary
+)
+
+summary(modelo_cox_primary)
+
+# Cox proportional hazards model for participants with secondary education
+modelo_cox_secondary <- coxph(
+  Surv(time, status) ~ gender + origin + age_group +
+    chemsex + chemsex:age_group,
+  data = datos_secondary
+)
+
+summary(modelo_cox_secondary)
+
+# Cox proportional hazards model for participants with university education
+modelo_cox_university <- coxph(
+  Surv(time, status) ~ gender + origin + age_group +
+    chemsex + chemsex:age_group,
+  data = datos_university
+)
+
+summary(modelo_cox_university)
+
+```
+
+##### Ej c
+
+```{r a_c}
+require(survival)
+
+
+modelo <- coxph(Surv(time, status) ~ education + origin + origin:education + age_group + chemsex + chemsex:age_group, data = datos)
+
+summary(modelo)
+
+```
+
+
+
+```{r a_d}
+require(survival)
+
+# Cox proportional hazards model
+modelo2 <- coxph(
+  Surv(time, status) ~ education + origin + origin:education +
+    age_group + chemsex + chemsex:age_group + casual_partners,
+  data = datos
+)
+
+summary(modelo2)
+
+# Baseline survival function from the Cox model
+base_surv <- survfit(modelo2)
+
+# Plot of the baseline survival function
+plot(base_surv,
+     xlab = "Follow-up time",
+     ylab = "Baseline survival probability",
+     main = "Baseline Survival Function (Cox Model)")
+
+```
+
+
+##### Estimated Survival Functions by Region of Origin
+
+
+```{r a_e}
+
+# Define newdata for each region of origin while keeping the remaining
+# covariates fixed at their reference categories
+newdata <- data.frame(
+  education = levels(datos$education)[1],
+  origin = levels(datos$origin),
+  age_group = levels(datos$age_group)[1],
+  chemsex = levels(datos$chemsex)[1],
+  casual_partners = levels(datos$casual_partners)[1]
+)
+
+# Estimated survival function from the Cox model for each region of origin
+base_surv_orig <- survfit(modelo2, newdata = newdata)
+
+# Plot estimated survival curves by region of origin
+# Since some curves overlap, different colors and line types are used
+# to improve visualization
+
+tipos_linea <- 1:length(levels(datos$origin))
+
+plot(base_surv_orig,
+     col = tipos_linea,
+     lty = tipos_linea,
+     lwd = 2,
+     xlab = "Follow-up time",
+     ylab = "Estimated survival probability",
+     main = "Estimated Survival Curves by Region of Origin (Cox Model)")
+
+legend("bottomleft",
+       legend = levels(datos$origin),
+       col = tipos_linea,
+       lty = tipos_linea,
+       lwd = 2)
+
+```
+
+
+##### Median Survival Time and One-Year HIV-Free Survival Probability by Region of Origin
+
+
+```{r a_f}
+
+# Median survival time
+surv_median(base_surv_orig, combine = FALSE)
+
+# One-year survival probability
+summary(base_surv_orig, times = 365)
+
+# Display the correspondence between levels and regions of origin
+newdata
+
+```
+
+
+##### Reduced Cox Model
+
+```{r a_g}
+
+# Full Cox model
+modelo2 <- coxph(
+  Surv(time, status) ~ education + origin + origin:education +
+    age_group + chemsex + chemsex:age_group + casual_partners,
+  data = datos
+)
+
+summary(modelo2)
+
+# Reduced Cox model
+modelod <- coxph(
+  Surv(time, status) ~ origin + age_group +
+    chemsex + chemsex:age_group + casual_partners,
+  data = datos
+)
+
+summary(modelod)
+
+```
+
+##### Assessment of the Proportional Hazards Assumption
+
+```{r a_h, fig.width=10, fig.height=6, warning=TRUE}
+require(survminer)
+# Graphical assessment
+
+## -log(-log(S(t)))
+
+### For region of origin
+surv_orig <- survfit(Surv(time, status)~origin, data=datos)
+ggsurvplot(surv_orig, fun = "cloglog", font.legend = 8)
+
+### For age group
+surv_orig <- survfit(Surv(time, status)~age_group, data=datos)
+ggsurvplot(surv_orig, fun = "cloglog", font.legend = 8)
+
+### For chemsex
+surv_orig <- survfit(Surv(time, status)~chemsex, data=datos)
+ggsurvplot(surv_orig, fun = "cloglog", font.legend = 8)
+
+### For number of casual sexual partners
+surv_orig <- survfit(Surv(time, status)~casual_partners, data=datos)
+ggsurvplot(surv_orig, fun = "cloglog", font.legend = 8)
+
+
+
+## Observed versus predicted survival curves
+
+### Predicted survival curves
+modelod
+
+
+### Observed survival curves for region of origin
+newdata <- data.frame(
+  origin = levels(datos$origin),
+  age_group = levels(datos$age_group)[1],
+  chemsex = levels(datos$chemsex)[1],
+  casual_partners = levels(datos$casual_partners)[1]
+)
+
+### Fit predicted survival curves from the Cox model
+fit_cox <- survfit(modelod, newdata = newdata)
+
+### Observed Kaplan-Meier survival curves by region of origin
+km_origin <- survfit(Surv(time, status) ~ origin, data = datos)
+
+### Plot observed and predicted survival curves
+plot(km_origin,
+     col = 1:5,
+     lwd = 2,
+     xlab = "Follow-up time",
+     ylab = "Survival probability",
+     main = "Observed vs Predicted Survival Curves")
+
+lines(fit_cox,
+      col = 1:5,
+      lty = 2,
+      lwd = 2)
+
+legend("bottomleft",
+       legend = c("Observed", "Predicted"),
+       lty = c(1,2),
+       lwd = 2)
+
+# Goodness-of-fit (GOF) assessment
+
+## Harrell and Lee test (Schoenfeld residual-based test)
+
+### Compute Harrell and Lee test statistic
+test_ph <- cox.zph(modelod, transform = "identity")
+test_ph
+
+### Schoenfeld residual plot for region of origin
+plot(test_ph, var="origin")
+abline(h = 0, col = "red", lty = 2)
+
+
+#Assessing PH using time-dependent covariates
+
+
+## Dummy variables for region of origin
+## (reference category: Central and South America)
+datos$origin_EE    <- as.numeric(datos$origin == "Eastern Europe")
+datos$origin_other <- as.numeric(datos$origin == "Other countries")
+datos$origin_Spain <- as.numeric(datos$origin == "Spain")
+datos$origin_WE    <- as.numeric(datos$origin == "Western Europe")
+
+## Dummy variables for age group
+## (reference category: 25 to 34 years)
+datos$age_u25   <- as.numeric(datos$age_group == "Under 25 years")
+datos$age_35_44 <- as.numeric(datos$age_group == "35 to 44")
+datos$age_45p   <- as.numeric(datos$age_group == "45 years or older")
+
+## Dummy variables for number of casual sexual partners
+## (reference category: ≥20 partners)
+datos$cp_0     <- as.numeric(datos$casual_partners == "0")
+datos$cp_1     <- as.numeric(datos$casual_partners == "1")
+datos$cp_2_4   <- as.numeric(datos$casual_partners == "2-4")
+datos$cp_5_9   <- as.numeric(datos$casual_partners == "5-9")
+datos$cp_10_19 <- as.numeric(datos$casual_partners == "10-19")
+
+## Dummy variable for chemsex
+## (reference category: No)
+datos$chemsex_bin <- as.numeric(datos$chemsex == "Yes")
+
+
+# Time-dependent Cox model for region of origin
+modelo_tt_origin <- coxph(
+  Surv(time, status) ~ origin + age_group + chemsex + chemsex:age_group + casual_partners +
+    tt(origin_EE) + tt(origin_other) + tt(origin_Spain) + tt(origin_WE),
+  data = datos,
+  tt = function(x, t, ...) x * log(t)
+)
+
+summary(modelo_tt_origin)
+
+# Time-dependent Cox model for age group
+modelo_tt_age <- coxph(
+  Surv(time, status) ~ origin + age_group + chemsex + chemsex:age_group + casual_partners +
+    tt(age_u25) + tt(age_35_44) + tt(age_45p),
+  data = datos,
+  tt = function(x, t, ...) x * log(t)
+)
+summary(modelo_tt_age)
+
+# Time-dependent Cox model for chemsex
+modelo_tt_chemsex <- coxph(
+  Surv(time, status) ~ origin + age_group + chemsex + chemsex:age_group + casual_partners +
+    tt(chemsex_bin),
+  data = datos,
+  tt = function(x, t, ...) x * log(t)
+)
+summary(modelo_tt_chemsex)
+
+# Time-dependent Cox model for number of casual sexual partners
+modelo_tt_cp <- coxph(
+  Surv(time, status) ~ origin + age_group + chemsex + chemsex:age_group + casual_partners +
+    tt(cp_0) + tt(cp_1) + tt(cp_2_4) + tt(cp_5_9) + tt(cp_10_19),
+  data = datos,
+  tt = function(x, t, ...) x * log(t)
+)
+summary(modelo_tt_cp)
+
+```
+
+##### Parametric Survival Modeling
+
+```{r a_i}
+install.packages("SurvRegCensCov")
+library(SurvRegCensCov)
+
+# Weibull survival model
+modelo_weibull <- WeibullReg(
+  Surv(time, status) ~ gender + age_group + education + origin + 
+    casual_partners + methamphetamine + ghb + mephedrone,
+  data = datos
+)
+modelo_weibull
+
+
+# Exponential survival model
+modelo_exp <- survreg(
+  Surv(time, status) ~ gender + age_group + education + origin + 
+    casual_partners + methamphetamine + ghb + mephedrone,
+  data = datos,
+  dist = "exponential"
+)
+
+summary(modelo_exp)
+
+# Extract hazard ratios, confidence intervals, and p-values
+sum_exp <- summary(modelo_exp)
+coefs <- sum_exp$table
+
+hr <- exp(-coefs[, "Value"])
+lb <- exp(-coefs[, "Value"] - 1.96 * coefs[, "Std. Error"])
+ub <- exp(-coefs[, "Value"] + 1.96 * coefs[, "Std. Error"])
+
+data.frame(HR = round(hr, 3), LB = round(lb, 3), UB = round(ub, 3), 
+           p = round(coefs[, "p"], 4))
+
+
+```
+
+##### Reduced Parametric Survival Model
+
+```{r a_j}
+
+modelo_j <- survreg(
+  Surv(time, status) ~ origin + age_group + casual_partners + methamphetamine + ghb + mephedrone,
+  data = datos,
+  dist = "exponential"
+)
+
+summary(modelo_j)
+
+# Extract hazard ratios, confidence intervals, and p-values
+sum_i <- summary(modelo_j)
+coefs <- sum_i$table
+
+hr <- exp(-coefs[, "Value"])
+lb <- exp(-coefs[, "Value"] - 1.96 * coefs[, "Std. Error"])
+ub <- exp(-coefs[, "Value"] + 1.96 * coefs[, "Std. Error"])
+
+data.frame(HR = round(hr, 3), LB = round(lb, 3), UB = round(ub, 3),
+           p = round(coefs[, "p"], 4))
+
+```
+
