@@ -1,0 +1,1219 @@
+---
+title: "Linear Mixed-Effects Modeling of Visual Acuity in an Age-Related Macular Degeneration Clinical Trial"
+author: "Giselle Piro Martino"
+date: "2026-06-19"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE, error = TRUE)
+```
+
+## Project Overview
+
+This project analyzes longitudinal visual acuity data from the Age-Related Macular Degeneration (ARMD) Clinical Trial, a multicenter randomized study designed to evaluate the efficacy of interferon alfa-2a treatment in patients with age-related macular degeneration.
+
+The primary outcome of interest was visual acuity, measured as the number of correctly read lines at multiple follow-up visits (baseline, 4, 12, 24, and 52 weeks). The repeated measurements collected for each participant make this dataset a classical example of longitudinal data with within-subject correlation.
+
+A subset of 150 participants was randomly selected from the original `armd.wide` dataset available in the `nlmeU` R package. The analysis reproduces the workflow described in Gałecki and Burzykowski's *Linear Mixed-Effects Models Using R*, including exploratory data analysis, data restructuring, visualization of longitudinal trajectories, and the development of a final linear mixed-effects model for visual acuity over time.
+
+
+
+
+```{r 1}
+# Load the ARMD clinical trial dataset
+library(nlmeU)
+data("armd.wide")
+
+# Set seed for reproducibility
+set.seed(51)
+
+```
+
+
+```{r 2}
+
+# Randomly sample 150 participants from the original cohort
+muestra <- sample(1:240, 150)
+
+```
+
+
+The analysis dataset was created by selecting the sampled participants from the original ARMD cohort. The resulting dataset contained 150 individuals.
+
+
+```{r 3}
+
+# Create the analysis dataset using the selected participants
+datos <- armd.wide[muestra,]
+
+# Verify that the subset contains 150 participants
+nrow(datos)
+
+```
+### Analysis Objectives
+
+The objective of this project was to perform a comprehensive longitudinal analysis of visual acuity trajectories in patients with age-related macular degeneration participating in the ARMD clinical trial.
+
+The analysis workflow included:
+
+* exploratory analysis and characterization of the study population,
+
+* transformation of the dataset from wide to long format,
+
+* visualization of individual and group-level visual acuity trajectories,
+
+* assessment of within-subject variability and correlation structures,
+
+* development and comparison of linear mixed-effects models,
+
+* selection of the final model based on statistical and clinical considerations.
+
+
+All analyses were performed in R using reproducible code and established methodologies for longitudinal data analysis.
+
+
+```{r AE1}
+
+# Initial data exploration
+str(datos)
+colSums(is.na(datos))
+head(datos)
+table(datos$treat.f) # Number of patients per treatment group
+
+```
+
+
+The analysis dataset consisted of 150 participants, including 75 individuals assigned to the placebo group and 75 to the active treatment group, and contained 10 variables.
+
+The available variables included the patient identifier (`subject`), baseline visual acuity (`visual0`), visual acuity measurements collected at weeks 4 (`visual4`), 12 (`visual12`), 24 (`visual24`), and 52 (`visual52`), treatment allocation (`treat.f`), and the missing data pattern indicator (`miss.pat`). Additional variables (`LESION` and `LINE0`) were available in the dataset but were not considered in the present analysis.
+
+Missing values were observed in visual acuity measurements at weeks 4, 12, 24, and 52, with loss to follow-up being particularly frequent at the final 52-week visit.
+
+
+```{r AE2, include = FALSE}
+library(reshape)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+
+# Convert the dataset from wide to long format
+
+datos_long <- datos %>%
+  pivot_longer(
+    cols = c(visual0, visual4, visual12, visual24, visual52),
+    names_to = "time",
+    values_to = "visual"
+  )
+
+# Convert time variable to numeric format
+datos_long$time <- as.numeric(gsub("visual", "", datos_long$time))
+
+dim(datos_long)
+head(datos_long)
+str(datos_long)
+
+# Create baseline subset
+baseline <- datos_long %>%
+  filter(time == 0) %>%
+  select(subject, visual0 = visual)
+
+# Create the analysis dataset excluding baseline visual acuity measurements
+armd <- datos_long %>%
+  filter(time > 0) %>%
+  left_join(baseline, by = "subject") %>%
+  droplevels()
+
+# Create time factor variable
+armd$time.f <- factor(armd$time)
+
+# Define polynomial contrasts for time
+armd <-
+  within(armd,
+         {
+           contrasts(time.f) <- contr.poly(4, scores = c(4, 12, 24, 52))
+         })
+
+head(armd)
+
+# Plot visual acuity trajectories over time for five randomly selected patients per treatment group
+
+set.seed(51)
+
+pacientes <- datos %>%
+  group_by(treat.f) %>%
+  slice_sample(n = 5) %>%
+  pull(subject)
+
+datos_plot <- subset(datos_long, subject %in% pacientes)
+
+ggplot(datos_plot,
+       aes(x = time,
+           y = visual,
+           group = subject,
+           colour = factor(subject))) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ treat.f) +
+  labs(x = "Time (weeks)",
+       y = "Visual acuity",
+       colour = "Patient") +
+  theme_bw()
+```
+
+##### Figurae 1:
+
+```{r AE2bis, echo =FALSE}
+library(ggplot2)
+
+datos_plot <- subset(datos_long, subject %in% pacientes)
+
+ggplot(datos_plot,
+       aes(x = time,
+           y = visual,
+           group = subject,
+           colour = factor(subject))) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ treat.f) +
+  labs(x = "Time (weeks)",
+       y = "Visual acuity",
+       colour = "Patient") +
+  theme_bw()
+
+```
+
+**Data Transformation**
+
+To facilitate the longitudinal analysis of visual acuity (VA) trajectories, the dataset was transformed from wide to long format, such that each row represented a single measurement for a given patient at a specific time point.
+
+In addition, an analysis dataset (`armd`) was created in which baseline visual acuity measurements were excluded from the response variable. However, baseline visual acuity (`visual0`) was retained as a covariate and linked to all subsequent observations through the patient identifier. This approach allows the analysis of post-randomization changes in visual acuity while adjusting for each patient's initial visual status, as baseline visual acuity may influence subsequent measurements.
+
+Finally, time was defined as a categorical factor (`time.f`) and orthogonal polynomial contrasts were specified. These contrasts allow subsequent models to evaluate both linear and non-linear temporal trends in visual acuity trajectories.
+
+**Graphical Exploration**
+
+Figure 1 illustrates visual acuity trajectories for a random sample of ten patients, including five individuals assigned to placebo and five assigned to active treatment.
+
+Considerable heterogeneity was observed across patients, both in baseline visual acuity levels and in their evolution throughout follow-up. In both treatment groups, some trajectories showed increases in visual acuity over time, whereas others showed declines, with no clear common temporal pattern emerging from the graphical inspection.
+
+Several patients in the treatment group exhibited an initial improvement in visual acuity during the early follow-up period, followed by stabilization or a gradual decline in later visits. However, relatively stable trajectories and moderate fluctuations were also observed, highlighting substantial between-subject variability.
+
+Since the figure represents only a small subset of participants, no conclusions regarding the efficacy of interferon alfa-2a can be drawn from this descriptive exploration alone.
+
+Missing observations were also evident, particularly at later follow-up visits and especially at week 52.
+
+Measurements collected closer in time tended to show more similar values within the same patient, suggesting positive within-subject correlation among repeated observations. Additionally, patients with higher baseline visual acuity generally appeared to maintain higher visual acuity levels throughout follow-up.
+
+**Missing Data Pattern**
+
+
+```{r AE3, echo =FALSE}
+
+# Inspect missing data patterns
+table(datos$miss.pat)
+```
+
+The pattern of missing data was examined using the `miss.pat` variable. Within the analysis subset, 111 patients had complete follow-up data across all scheduled visits. Missing observations were observed for 16 patients at week 52 only, 3 patients at week 24 only, 6 patients at both weeks 24 and 52, 1 patient at weeks 12 and 24, 5 patients at weeks 12, 24, and 52, 2 patients at week 4 only, 1 patient at all follow-up visits (weeks 4, 12, 24, and 52), and 5 patients with no post-baseline measurements available.
+
+A total of seven patients presented non-monotone missingness patterns (intermittent missing values). This aspect is particularly relevant for longitudinal modeling, as it may influence the specification and selection of appropriate variance-covariance structures.
+
+**Visual Acuity Means and Medians Over Time by Treatment Group**
+
+
+```{r AE4, echo = FALSE}
+
+# Visual acuity means and medians by time point and treatment group
+
+datos_long$time.f <- factor(datos_long$time) # Create time factor variable
+
+# Number of non-missing visual acuity measurements
+attach(datos_long)
+flst <- list(time.f, treat.f)
+tN <-
+tapply(visual, flst,
+       FUN = function(x) length(x[!is.na(x)]))
+
+# Visual acuity means and medians
+tMn <- tapply(visual, flst, FUN = mean, na.rm = TRUE) # Means
+tMd <- tapply(visual, flst, FUN = median, na.rm = TRUE) # Medians
+
+# Assign column names
+invisible(colnames(res <- cbind(tN, tMn, tMd)))
+
+# Define new column names
+nms1 <- rep(c("P", "A"), 3)
+nms2 <- rep(c("n", "Mean", "Median"), rep(2, 3))
+colnames(res) <- paste(nms1, nms2, sep = ":")
+res
+
+```
+
+
+The table summarizes the mean and median visual acuity values at each follow-up visit for both the active treatment and placebo groups.
+
+Overall, mean and median visual acuity values were similar between treatment groups throughout follow-up, although slightly higher values were observed in the placebo group at some time points. The largest difference was observed at week 52, where both the mean and median visual acuity values were higher in the placebo group.
+
+The number of available observations decreased over time in both treatment groups, with a somewhat more pronounced reduction in the active treatment group.
+
+##### Figure 2:
+
+
+```{r AE5, echo = FALSE}
+
+# Box-and-whisker plots
+library(lattice)
+
+bw1 <- bwplot(visual ~ time.f | treat.f, data = datos_long)
+
+# Custom x-axis labels
+xlims <- c("Baseline", "4\nweeks", "12\nweeks", "24\nweeks", "52\nweeks")
+
+# Update plot appearance
+update(bw1, xlim = xlims, pch = "|")
+
+detach(package:lattice)
+
+
+```
+
+
+Figure 2 presents box-and-whisker plots of visual acuity measurements at each follow-up visit for both treatment groups.
+
+A gradual decrease in visual acuity values over time can be observed in both groups, with a somewhat more pronounced decline in the active treatment group. However, this finding should be interpreted with caution, as a higher proportion of missing observations was also observed in the treatment group during follow-up, particularly at later visits.
+
+**Missing Data Patterns by Treatment Group**
+
+
+```{r AE6, echo = FALSE}
+
+# Analysis of monotone missing data patterns
+mnt.pat <- c("----", "---X", "--XX", "-XXX", "XXXX")
+
+datos.mnt <- subset(datos, miss.pat %in% mnt.pat)
+invisible(dim(datos.mnt))
+
+# Number of patients with each missing data pattern by treatment group
+with(datos.mnt, {
+  fl <- list(treat.f, miss.pat)
+  tapply(subject, fl, FUN = function(x) length(x[!is.na(x)]))
+})
+
+```
+
+The table summarizes the distribution of missing data patterns according to treatment group. The most frequent pattern corresponded to patients with complete follow-up measurements available at all scheduled visits. As follow-up progressed, an increasing number of missing observations was observed, reflecting a progressive dropout pattern over time.
+
+Both treatment groups showed broadly similar missingness patterns, although greater variability in the pattern of missing observations was apparent in the active treatment group. Overall, the observed pattern is largely consistent with monotone missingness, which is commonly encountered in longitudinal studies.
+
+**Variance-Covariance and Correlation Structure Among Patients with Complete Data**
+
+
+##### Variance-covariance matrix for patients with complete data
+```{r AE7, echo =FALSE}
+# Variance-covariance matrix for patients without missing values
+var(datos[, c("visual0","visual4","visual12","visual24","visual52")],
+    use = "complete.obs")
+
+```
+
+##### Correlation matrix for patients with complete data
+
+```{r AE7bis, echo =FALSE}
+
+# Correlation matrix for patients without missing values
+cor(datos[, c("visual0","visual4","visual12","visual24","visual52")],
+    use = "complete.obs")
+
+
+```
+
+
+##### Scatterplot matrix
+
+
+```{r AE7bis2, echo =FALSE}
+# Scatterplot matrix
+pairs(
+  na.omit(datos[, c("visual0","visual4","visual12","visual24","visual52")])
+)
+```
+
+
+The variance-covariance matrix shows a progressive increase in the variability of visual acuity measurements throughout follow-up. In turn, the correlation matrix reveals a temporal dependence structure, with stronger correlations observed between measurements collected closer in time.
+
+These findings suggest the presence of within-subject correlation and temporal dependence among repeated observations, supporting the use of linear mixed-effects models to analyse visual acuity trajectories over time.
+
+**Linear mixed-effects model with random intercept and homogeneous residual variance: `lm.mix`**
+
+
+```{r AE8}
+
+library(dplyr)
+library(nlme)
+
+armd2 <- na.omit(armd) # Remove missing values to fit the mixed-effects model
+
+# Model
+lm.fix <-  formula(visual ~ visual0 + time + treat.f + treat.f:time)
+
+lm.mix <- lme(lm.fix, random = ~1|subject, data = armd2)
+summary(lm.mix)
+
+```
+
+
+```{r AE8bis, include =FALSE}
+
+# Check the grouping structure of the model (repeated measurements within subjects)
+getGroupsFormula(lm.mix)
+
+# Grouping factor
+str(grpF <- getGroups(lm.mix))
+
+# Inspect the first values of the grouping factor
+grpF[1:17]
+
+# Inspect the first levels of the grouping factor
+levels(grpF)[1:5]
+
+```
+**Range of observations per subject:**
+
+```{r AE8bis2, echo =FALSE}
+
+# Range of observations per subject
+range(xtabs(~grpF))
+```
+
+
+A linear mixed-effects model with a random intercept and homogeneous residual variance was fitted to analyse the evolution of visual acuity as a function of baseline visual acuity, time, and treatment group.
+
+
+VISUALit = β0 +β1 ×VISUAL0i +β2 ×TIMEit +β3 ×TREATi+β4 ×TREATi ×TIMEit + β0i +eit.
+
+
+where (VISUAL_{it}) represents the visual acuity observed for patient (i) at time (t).
+
+### Fixed-effects component
+
+The fixed effects describe the average trajectory in the population and include the following terms:
+
+* (VISUAL0_i): baseline visual acuity measured before treatment initiation.
+* (TIME_{it}): time elapsed since study entry (in weeks).
+* (TREAT_i): treatment group indicator (1 = active treatment, 0 = placebo).
+* (TREAT_i \times TIME_{it}): interaction between treatment and time.
+
+The model coefficients can be interpreted as follows:
+
+* (\beta_0): expected mean visual acuity when all covariates are equal to zero (intercept).
+* (\beta_1): average change in visual acuity associated with a one-unit increase in baseline visual acuity.
+* (\beta_2): average change in visual acuity per additional week of follow-up in the reference group.
+* (\beta_3): overall treatment effect (difference between treatment groups).
+* (\beta_4): difference in temporal trajectories between treatment groups (treatment-by-time interaction effect).
+
+### Random-effects component
+
+The random intercept (b_{0i}) captures individual variability in baseline visual acuity, allowing each patient to have a different starting point relative to the population mean:
+
+[
+b_{0i} \sim N(0, d_{11})
+]
+
+where (d_{11}) represents the between-subject variability.
+
+The term (e_{it}) represents the residual error associated with each observation:
+
+[
+e_{it} \sim N(0, \sigma^2)
+]
+
+Residual errors are assumed to have constant variance across all subjects and follow-up times (homogeneous residual variance assumption).
+
+This model therefore combines two sources of variability:
+
+* **Between-subject variability**, captured through the random intercept (b_{0i}), which allows each patient to have a different baseline level of visual acuity.
+* **Within-subject variability** not explained by the model, represented by the residual term (e_{it}), under the assumption of constant residual variance across observations.
+
+Consequently, the model describes both the average evolution of visual acuity over time and the individual differences observed between patients.
+
+The results show a significant positive association between baseline visual acuity and subsequent visual acuity measurements ((\beta_1 = 0.75)), indicating that patients with better baseline visual acuity tend to maintain higher values throughout follow-up. Baseline visual acuity was the strongest predictor in the model.
+
+In the control group, visual acuity showed a significant decline over time ((\beta_2 = -0.20) per week). The treatment-by-time interaction was negative ((\beta_4 = -0.09)), suggesting that patients receiving active treatment experienced a slightly greater decline in visual acuity compared with the control group.
+
+Substantial between-subject variability in baseline visual acuity was observed (SD = 8.20), together with considerable residual variability (SD = 8.63), supporting the use of a mixed-effects modeling approach.
+
+No significant differences between treatment groups were detected at baseline ((TREAT_i), (p = 0.43)). However, the treatment-by-time interaction was statistically significant, indicating that visual acuity trajectories differed between treatment groups, with a faster decline observed in the treated group.
+
+Overall, the results indicate that visual acuity during follow-up is strongly associated with baseline visual acuity, such that patients with higher initial values tend to maintain better visual acuity over time. In addition, a significant decline in visual acuity was observed throughout follow-up. The main effect of treatment was not statistically significant, suggesting no baseline differences between treatment groups after adjustment for baseline visual acuity. However, the significant treatment-by-time interaction indicates that temporal trajectories differed between groups, with a somewhat steeper decline observed in the treated group.
+
+These findings suggest that treatment does not appear to confer a beneficial effect on visual acuity progression and may even be associated with a slightly less favourable trajectory in the treated group. Nevertheless, this interpretation should be made cautiously, as the model does not account for all potential confounders, assumes a linear effect of time, and does not allow for subject-specific variation in temporal slopes.
+
+The grouping structure of the model was verified, confirming that repeated measurements were nested within subjects, reflecting the longitudinal nature of the data. The number of observations per individual ranged from one to four measurements per subject, indicating an unbalanced design.
+
+This structure is well suited for linear mixed-effects models, as these models naturally accommodate unbalanced data and repeated measurements.
+
+
+
+
+```{r AE9}
+
+# Estimate the D variance-covariance matrix of the random effects (between-subject variability)
+getVarCov(lm.mix, individual = "1")
+
+# Estimate the R matrix (within-subject variability)
+getVarCov(lm.mix, type = "conditional", individual = "1")
+
+# Estimate the marginal variance-covariance matrix V (total variability: between- and within-subject variability)
+lm.mix.cov <- getVarCov(lm.mix, type = "marginal", individual = "1")
+lm.mix.cov
+
+# Estimate the correlation matrix from the marginal covariance matrix
+cov2cor(lm.mix.cov[[1]])
+```
+
+The variance-covariance matrix of the random effects indicates between-subject variability in baseline visual acuity ((\sigma^2 \approx 67.17)), suggesting initial differences between patients.
+
+The residual variance is slightly larger ((\sigma^2 \approx 74.54)), reflecting within-subject variability over time that is not explained by the model covariates.
+
+Therefore, variability is observed both between and within individuals.
+
+The variance-covariance structure of the random effects is assumed to be common to all subjects; that is, all individuals share the same variability in the random intercept.
+
+For the subject analysed, only two post-baseline measurements were available instead of four, reflecting the unbalanced nature of the data.
+
+The marginal variance-covariance matrix ((V)) represents the total variability within a subject, resulting from the combination of between-subject variability ((D)) and residual variability ((R)) according to the linear mixed-effects model structure.
+
+Based on this matrix, the marginal correlation matrix shows a moderate correlation (~0.47) between repeated measurements within the same subject, which is commonly observed in longitudinal data.
+
+## Linear mixed-effects model with a random intercept and time-dependent heteroscedastic residual variance: `lm.mix2`
+
+
+```{r AE10}
+
+# Fit a new model that improves upon the previous one by allowing the variance to change over time
+lm.mix2 <- 
+ update(lm.mix,
+ weights = varPower(form = ~ time),
+ data = armd2)
+
+summary(lm.mix2)
+
+```
+
+
+
+The `lm.mix2` model extends the initial mixed-effects model (`lm.mix`) by incorporating a time-dependent variance structure, thereby relaxing the assumption of homoscedasticity.
+
+The model with time-dependent variance retains the main findings of the previous model regarding the fixed effects. In particular, baseline visual acuity remains positively and highly significantly associated with subsequent visual acuity measurements ((\beta \approx 0.79)), confirming its role as the main predictor during follow-up.
+
+The effect of time remains negative and significant ((\beta \approx -0.21)), indicating a progressive decline in visual acuity throughout the study in both treatment groups. The main effect of treatment is not statistically significant. The treatment-by-time interaction shows a trend towards significance ((p \approx 0.10)), although it does not reach conventional levels of statistical significance.
+
+The main difference compared with the previous model lies in the variance structure. The estimated power parameter ((\approx 0.29)) indicates that the residual variability is not constant but instead increases moderately over time. This suggests that patients become progressively more heterogeneous as follow-up progresses, a feature that was not captured by the previous model. This pattern may be influenced, at least partially, by the greater amount of missing data at later follow-up times, which reduces the amount of information available at these visits.
+
+In conclusion, the results are consistent with those obtained previously regarding the main effects, while providing a better characterization of variability over time. The model suggests that the evolution of visual acuity is primarily associated with baseline status and follow-up time rather than treatment, and that residual variability increases with time.
+
+
+
+```{r AE11}
+# Estimate the D variance-covariance matrix of the random effects (between-subject variability)
+VarCorr(lm.mix2)
+
+# Estimate the R matrix (within-subject variability)
+getVarCov(
+  lm.mix2,
+  type = "conditional",
+  individual = "1"
+)
+
+# Estimate the marginal variance-covariance matrix V (total variability: between-subject and within-subject variability)
+lm.mix2.cov <- getVarCov(
+  lm.mix2,
+  type = "marginal",
+  individual = "1"
+)
+
+lm.mix2.cov
+
+# Estimate the correlation matrix from the marginal covariance matrix
+cov2cor(lm.mix2.cov[[1]])
+
+```
+
+
+The variance-covariance matrix of the random effects shows between-subject variability in baseline visual acuity ((\sigma^2 \approx 51.6)), indicating initial differences between patients.
+
+Regarding within-subject variability, the estimated residual variance is lower ((\sigma^2 \approx 14.8)). Part of the variability over time is captured by the model structure itself, particularly through the time-dependent variance specification.
+
+The conditional covariance matrix reflects that within-subject variability is not constant across observations, which is consistent with the time-dependent variance structure incorporated into the model.
+
+The marginal covariance matrix represents the total variability of the model. Based on this matrix, the corresponding correlation matrix indicates an approximate correlation of 0.52 between repeated measurements within the same individual, suggesting a moderate dependence between observations, as is commonly observed in longitudinal data.
+
+Overall, the results reveal a clear within-subject correlation structure consistent with the longitudinal nature of the data. Incorporating a time-dependent variance structure provides greater flexibility in modelling the observed heterogeneity and improves the description of variability compared with the previous model.
+
+### Figure 3: Conditional Pearson residual plot
+
+
+```{r AE12, echo=FALSE}
+library(lattice)
+
+# Conditional Pearson residual plot
+plot(lm.mix2)
+```
+
+##### Figure 4: Pearson residual plots and boxplots by time and treatment group
+```{r AE12b, echo=FALSE}
+
+# Pearson residual plots and boxplots by time and treatment group
+plot(lm.mix2,
+ resid(., type = "pearson") ~ time | treat.f,
+ id = 0.05)
+bwplot(resid(lm.mix2, type = "p") ~ time.f | treat.f,
+ data = armd2)
+
+```
+
+##### Figure 5: Normal Q-Q plots of the Pearson residuals and predicted random effects
+```{r AE12c, echo=FALSE}
+
+# Normal Q-Q plots of the Pearson residuals and predicted random effects
+qqnorm(lm.mix2, ~resid(.) | time.f)
+qqnorm(lm.mix2, ~ranef(.))
+
+```
+
+
+##### Figure 6: Augmented predictions plot
+```{r AE12d, echo=FALSE}
+
+# Augmented predictions plot
+aug.Pred <- 
+ augPred(lm.mix2,
+ primary = ~time, 
+ level = 0:1, # Population-level and subject-specific predictions
+ length.out = 2)
+plot(aug.Pred, layout = c(4, 4, 1), 
+ key = list(lines = list(lty = c(1,2)),
+ text = list(c("Marginal", "Subject-specific")),
+ columns = 2))
+```
+
+
+
+The diagnostic plots of the model generally indicate an adequate fit in terms of both the central tendency and the variance structure. In the plot of Pearson residuals versus fitted values, the residuals are centred around zero and no clear systematic patterns are observed, suggesting that the model adequately captures the mean structure of the data. However, some extreme values are present and may correspond to potentially influential observations.
+
+The analysis of Pearson residuals by time and treatment group does not reveal systematic differences between groups or evident temporal patterns. Some individuals exhibit extreme residual values, although no clear association with treatment group or follow-up time is apparent.
+
+The residual boxplots show medians close to zero across all time points and treatment groups, indicating the absence of systematic bias. The variability is similar between groups, although a few isolated outliers are observed.
+
+Regarding normality, the Q-Q plot of the residuals suggests moderate departures from the normal distribution, mainly in the tails, although these deviations are not severe. The Q-Q plot of the random effects shows a similar pattern, with some observations deviating from the theoretical line, suggesting slight departures from normality in the random intercepts.
+
+The augmented predictions plot allows comparison between the model mean trajectory and the individual trajectories. Overall, both are consistent, with approximately parallel trajectories for most subjects, indicating random effects of moderate magnitude and a good fit to the individual variability. A general decreasing trend in visual acuity is also observed, together with differences in baseline levels between subjects, which is consistent with the inclusion of a random intercept.
+
+In some cases, larger deviations from the predicted trajectories are observed, corresponding to subjects with extreme values or less regular patterns of evolution. These cases reflect the heterogeneity commonly observed in longitudinal data.
+
+In conclusion, the diagnostic analyses suggest a reasonable model fit, with no major issues regarding the mean structure or the variance specification. Moderate departures from normality are observed in both the residuals and the random effects, together with the presence of a few atypical subjects, although these do not appear to compromise the overall model fit.
+
+## Linear mixed-effects model with a random intercept, time-dependent heteroscedastic variance, and a random slope for time: `lm.mix3`
+
+
+```{r AE13}
+# Fit a new model that improves upon the previous one by including a random slope for time
+lm.mix3 <- update(
+  lm.mix2,
+  random = ~1 + time | subject,
+  data = armd2
+)
+
+summary(lm.mix3)
+
+# Estimate the variance-covariance matrix of the random effects
+getVarCov(lm.mix3)
+
+# Confidence intervals for the random-effect variances
+intervals(lm.mix3, which = "var-cov")
+
+```
+
+
+The third model incorporates a random slope for time. That is, instead of assuming that all subjects share the same temporal effect, it allows the longitudinal evolution of visual acuity to vary across individuals.
+
+[
+\text{VISUAL}*{it} = \beta_0 + \beta_1 \text{VISUAL0}*i + \beta_2 \text{TIME}*{it} + \beta_3 \text{TREAT}*i + \beta_4 (\text{TREAT} \times \text{TIME})*{it} + b*{0i} + b_{2i}\text{TIME}*{it} + e*{it}
+]
+
+The random effects are assumed to follow a multivariate normal distribution:
+
+[
+b_i \sim N(0,D)
+]
+
+and the within-subject errors satisfy:
+
+[
+e_i \sim N(0,\sigma^2)
+]
+
+The fixed effects are consistent with those obtained in the previous models. Baseline visual acuity remains a strong positive predictor of subsequent visual acuity, while time has a significant negative effect, indicating a progressive decline over follow-up. The main effect of treatment is not statistically significant, and the treatment-by-time interaction does not reach statistical significance, although it suggests possible differences in the trajectories between treatment groups.
+
+Regarding the random effects, the model summary shows substantial between-subject variability both in the intercept (SD ≈ 6.67) and in the time slope (SD ≈ 0.27). The correlation between these two effects is weak (≈ 0.07), indicating little association between baseline level and rate of change over time.
+
+In addition, the residual variance remains time-dependent (power parameter ≈ 0.08), indicating heteroscedasticity in the longitudinal evolution, although to a lesser extent than in the previous model.
+
+Overall, the `lm.mix3` model provides a more flexible description of the within-subject correlation structure by incorporating variability both in baseline levels and in temporal trajectories, together with a time-dependent residual variance structure.
+
+## Linear mixed-effects model with a random intercept, time-dependent heteroscedastic variance, a random slope for time, and no correlation between the random intercept and the random time slope: `lm.mix4`
+
+```{r AE14}
+
+# Fit a new model that modifies the previous one by assuming that the random intercept
+# and the random slope for time are uncorrelated
+lm.mix4 <- update(
+  lm.mix3,
+  random = list(subject = pdDiag(~time)),
+  data = armd2
+)
+
+summary(lm.mix4)
+
+# Confidence intervals for the random-effect variances
+intervals(lm.mix4)
+
+# Comparison between the lm.mix3 and lm.mix4 models
+anova(lm.mix4, lm.mix3)
+
+
+```
+
+
+
+The `lm.mix4` model is fitted as an extension of the `lm.mix3` model. The fixed-effects structure and the inclusion of random intercepts and random slopes are maintained, but a restriction is imposed on the random-effects variance-covariance matrix through a diagonal structure (`pdDiag`).
+
+This restriction assumes independence between the random intercept and the random time slope, meaning that no correlation is allowed between subjects' baseline levels and their rates of change over time.
+
+The fixed effects remain essentially unchanged compared with the previous model. Baseline visual acuity continues to be a positive and statistically significant predictor, while time shows a significant negative effect. Neither treatment nor the treatment-by-time interaction is statistically significant.
+
+Regarding the random effects, between-subject variability is retained both in the intercept and in the time slope (SD ≈ 6.80 and 0.27, respectively), under the assumption of independence between the two components.
+
+The comparison between the `lm.mix3` and `lm.mix4` models using a likelihood ratio test (`anova`) does not reveal statistically significant differences ((p = 0.692)). Therefore, there is no evidence that including the correlation between the intercept and the slope improves the model fit, suggesting that the more parsimonious `lm.mix4` model is preferable.
+
+### Figure 7: Conditional Pearson residual plot
+
+
+```{r AE15, echo =FALSE}
+
+library(lattice)
+
+# Conditional Pearson residual plot
+plot(lm.mix4)
+
+```
+
+##### Figure 8: Pearson residual plots and boxplots by time and treatment group
+```{r AE15bis, echo =FALSE}
+
+# Pearson residual plots and boxplots by time and treatment group
+plot(lm.mix4,
+ resid(., type = "pearson") ~ time | treat.f,
+ id = 0.05)
+bwplot(resid(lm.mix4, type = "p") ~ time.f | treat.f,
+ data = armd2)
+
+
+```
+
+
+##### Figure 9: Normal Q-Q plots of the Pearson residuals and predicted random effects
+
+```{r AE15bis2, echo =FALSE}
+# Normal Q-Q plots of the Pearson residuals and predicted random effects
+qqnorm(lm.mix4, ~resid(.) | time.f)
+qqnorm(lm.mix4, ~ranef(.))
+```
+
+##### Figure 10: Augmented predictions plot 
+
+```{r AE15bis3, echo =FALSE}
+
+# Augmented predictions plot
+aug.Pred <- 
+ augPred(lm.mix4,
+ primary = ~time, 
+ level = 0:1, # Population-level and subject-specific predictions
+ length.out = 2)
+plot(aug.Pred, layout = c(4, 4, 1), 
+ key = list(lines = list(lty = c(1,2)),
+ text = list(c("Marginal", "Subject-specific")),
+ columns = 2))
+
+```
+
+
+Since the lm.mix4 model provided the best balance between goodness of fit and model complexity, all diagnostic analyses were performed using this model.
+
+Overall, the diagnostic plots indicate an adequate fit to the data and do not reveal major violations of the assumptions underlying the linear mixed-effects model.
+
+The plot of standardized residuals against fitted values shows residuals centred around zero with no evident systematic patterns. However, a slight asymmetry and the presence of several extreme values can be observed, suggesting that some observations are less well represented by the model than others.
+
+The Pearson residuals plotted according to time and treatment group do not show clear temporal trends or systematic differences between groups. Nevertheless, a small number of atypical observations are evident, particularly within the placebo group.
+
+The Q-Q plots of the residuals indicate an approximately normal distribution in the central region, although some deviations are observed in the tails. These departures from normality appear to be relatively minor and are unlikely to have a substantial impact on the model results.
+
+Regarding the random effects, the Q-Q plots suggest a reasonable approximation to normality for both the random intercepts and the random slopes for time. Although slight deviations are present in the extreme quantiles, there is no evidence of serious violations of this assumption.
+
+The augmented predictions reveal noticeable differences between subjects, particularly in baseline visual acuity levels. Individual trajectories generally follow the same overall downward trend observed at the population level. The differences between marginal predictions and subject-specific predictions are moderate, indicating the presence of between-subject variability, although this variability is not excessively large.
+
+In conclusion, the diagnostic analyses suggest that the model provides a reasonable description of the longitudinal visual acuity data. Although a small number of atypical observations and minor departures from normality are present, these do not appear to materially affect the overall fit or the main conclusions of the analysis.
+
+**Linear mixed-effects model with a random intercept, time-dependent heteroscedastic variance, a random slope for time, no correlation between the random intercept and random time slope, and a time-constant treatment effect: lm.mix5**
+
+```{r AE16}
+
+# Fit a new model in which treatment is assumed to have a constant effect over time
+lm3.form <- formula(visual~visual0 + time + treat.f)
+
+lm.mix5 <- update(lm.mix4, lm3.form, data = armd2)
+
+summary(lm.mix5)
+
+
+# Confidence intervals for the variance-covariance parameters
+intervals(lm.mix5, which = "var-cov")
+
+# Variances and correlations of the random effects
+VarCorr(lm.mix5)
+
+# Conditional variance-covariance matrix
+getVarCov(lm.mix5, type ="conditional", individual ="1")
+
+# Estimate the marginal variance-covariance matrix V
+# (total variability: between-subject and within-subject variability)
+lm.mix5.cov <- getVarCov(lm.mix5, type ="marginal", individual ="1")
+lm.mix5.cov
+
+# Estimate the correlation matrix from the marginal covariance matrix
+cov2cor(lm.mix5.cov[[1]])
+
+```
+
+The lm.mix5 model was obtained from lm.mix4 by removing the treatment-by-time interaction term. Consequently, the effect of treatment is assumed to remain constant throughout follow-up, while preserving the same random-effects and residual variance structures.
+
+The model can be expressed as:
+
+
+VISUALit = β0 +β1 ×VISUAL0i βb2 ×TIMEit +β3 ×TREATi + b0i + b2i ×TIMEit +eit.
+
+This specification implies that the average trajectories for the treatment groups are parallel over time, such that the difference between groups remains constant during the entire study period.
+
+Regarding the fixed effects, baseline visual acuity (visual0) remained a strong positive predictor of subsequent visual acuity measurements (β=0.818, p<0.001). Time had a significant negative effect (β=−0.254, p<0.001), indicating a progressive decline in visual acuity during follow-up. In contrast, the treatment effect was not statistically significant (β=−2.044, p=0.143).
+
+The random-effects structure revealed substantial between-subject variability both in the intercept (SD ≈ 6.79) and in the time slope (SD ≈ 0.28). The variance-covariance matrix was specified as diagonal, implying independence between these two random components.
+
+The heteroscedastic variance structure yielded an estimated power parameter of approximately 0.082. Since the confidence interval for this parameter included zero, there was no strong statistical evidence of systematic changes in residual variance over time.
+
+The residual standard deviation was estimated at approximately 5.50, representing the within-subject variability not explained by the model.
+
+The marginal variance-covariance matrix indicated substantial overall variability together with positive correlation among repeated measurements within the same subject (ρ≈0.53), which is consistent with the longitudinal structure of the data.
+
+Alternative residual variance specification using varIdent()
+
+In models lm.mix2 and lm.mix3, the residual variance was modelled using the varPower() function, which allows the residual variance to vary as a power function of time. Although this specification improved model fit relative to a model assuming homogeneous residual variance, it imposes a specific parametric form on the evolution of variability over time.
+
+To assess whether this assumption is appropriate, an alternative model was fitted using the same fixed-effects and random-effects structures but replacing the residual variance specification with the more flexible varIdent() function. This approach allows the residual variance to differ freely across follow-up visits without imposing a predetermined functional relationship with time.
+
+A likelihood ratio test comparing both models can then be used to determine whether the additional flexibility provided by varIdent() leads to a statistically significant improvement in model fit.
+
+```{r AE17}
+
+lm.mix6 <- update(
+  lm.mix2,
+  weights = varIdent(form = ~ 1 | time.f),
+  data = armd2
+)
+
+summary(lm.mix6)
+
+# Likelihood ratio test
+anova(lm.mix2, lm.mix6)
+
+```
+
+
+The likelihood ratio test comparing lm.mix2 and the alternative model lm.mix6 did not reveal statistically significant differences (L.Ratio = 0.72, p = 0.698).
+
+Therefore, there is no evidence that the more flexible variance structure improves model fit. Consequently, the varPower() specification appears adequate to describe the heteroscedasticity present in the data.
+
+The time-specific Q-Q plots and profile likelihood plots included in the original analysis were not considered necessary in the present study, as no convergence problems or indications of instability in parameter estimation were observed (in contrast to the analysis based on the complete dataset presented in the reference text).
+
+Once the residual variance structure had been evaluated, alternative model specifications were compared in terms of overall complexity using the Akaike Information Criterion (AIC), with the aim of identifying the best balance between model fit and parsimony.
+
+
+```{r AE18}
+
+AIC(lm.mix, lm.mix2, lm.mix3, lm.mix4)
+
+# Refit the lm.mix4 and lm.mix5 models using maximum likelihood (ML)
+# to allow valid comparison between models
+lm.mix4ml <- update(lm.mix4, method = "ML")
+lm.mix5ml <- update(lm.mix5, method = "ML")
+
+# Likelihood ratio test
+anova(lm.mix4ml, lm.mix5ml)
+
+```
+
+
+The AIC comparison suggests a progressive improvement in model fit as model complexity increases, with lm.mix4 presenting the lowest AIC value and therefore the best overall fit.
+
+However, the likelihood ratio test comparing lm.mix4 and lm.mix5 was not statistically significant (L.Ratio = 2.64, p = 0.104), indicating that the inclusion of the treatment-by-time interaction does not meaningfully improve model fit.
+
+Overall, these results suggest that lm.mix4 provides a good balance between goodness of fit and parsimony. Nevertheless, since lm.mix4 had previously been shown not to provide a substantial improvement over lm.mix3, the latter was retained as the final model specification on the basis of parsimony, as it provides an equivalent fit with lower complexity.
+
+**Random intercept**
+
+```{r AE19}
+
+# Comparison between the model without random effects (vis.gls1a)
+# and the mixed-effects model (lm.mix)
+
+lm.form <- formula(visual ~ visual0 + time + treat.f + treat.f:time)
+
+vis.gls1a <- gls(lm.form, data = armd2)
+
+# Refit lm.mix using maximum likelihood (ML) so that both models
+# are on the same scale and can be compared appropriately
+lm.mix.ml <- update(lm.mix, method = "ML")
+
+# Likelihood ratio test
+anova.res <- anova(vis.gls1a, lm.mix)
+anova.res[["p-value"]][2] / 2
+
+# Simulated null distribution
+library(RLRsim)
+exactRLRT(lm.mix)
+
+```
+
+
+To evaluate the need for random intercepts in the model, a model without random effects (GLS model) was compared with a mixed-effects model incorporating between-subject variability through random intercepts.
+
+The likelihood ratio test indicated a significant improvement in model fit for the mixed-effects model, suggesting the presence of between-subject heterogeneity and supporting the inclusion of random effects.
+
+This result was confirmed by the simulation-based RLRT, which also provided strong evidence in favour of the model with random intercepts. Taken together, both analyses support the presence of substantial between-subject variability.
+
+**Random effects**
+
+The presence of inter-individual heterogeneity in the temporal evolution of visual acuity was evaluated through the inclusion of random slopes.
+
+To this end, a model with a random intercept was compared with a more flexible specification that additionally incorporated random slopes for time, allowing temporal trajectories to vary across subjects. The model without random slopes represents the null hypothesis of no individual differences in temporal evolution.
+
+
+```{r AE20}
+
+# Fit a model with random intercept and random slope, assuming constant
+# residual variance, in order to apply exactRLRT()
+# The "optim" optimizer is used because the default optimizer ("nlminb")
+# failed to converge
+lm.mix7 <- update(
+  lm.mix4,
+  weights = NULL,
+  data = armd2,
+  control = lmeControl(opt = "optim")
+)
+
+# Likelihood ratio test to evaluate the need for random slopes
+(an.res <- anova(lm.mix, lm.mix7))
+
+# Likelihood ratio test statistic
+(RLRT <- an.res[["L.Ratio"]][2])
+
+```
+
+
+The likelihood ratio test comparing the two models was statistically significant (*p* < 0.0001), indicating that the inclusion of a random slope for time substantially improves model fit. In other words, the model with both random intercepts and random slopes provides a better description of the data than the model including only random intercepts.
+
+
+```{r AE21}
+library(RLRsim)
+
+# Auxiliary model for the RLRT
+mAux <- update(
+  lm.mix,
+  random = ~0 + time | subject,
+  data = armd2
+) # auxiliary model including only random slopes
+
+# Exact RLRT
+exactRLRT(m = mAux, m0 = lm.mix, mA = lm.mix7)
+
+# Simulation of the null distribution
+vis.lme2.sim <- simulate(
+  lm.mix,
+  m2 = lm.mix7,
+  nsim = 1000
+)
+
+plot(
+  vis.lme2.sim,
+  df = c(1, 2),
+  abline = c(0, 1, lty = 2)
+)
+
+```
+
+Exact restricted likelihood ratio test for random slopes
+
+The exact restricted likelihood ratio test (exactRLRT), based on simulation of the null distribution (10,000 replications), confirmed that the variance component associated with the random slope for time was highly significant (RLRT = 77.39, p < 2.2 × 10⁻¹⁶). This result provides strong evidence in favour of including random slopes in the model compared with the specification including only a random intercept.
+
+This conclusion is consistent with the likelihood ratio test results, although the exact RLRT procedure is more appropriate in this context because it avoids reliance on asymptotic approximations.
+
+Overall, the evidence supports the inclusion of between-subject variability in the temporal evolution of visual acuity, improving the model's ability to capture the heterogeneity observed in the longitudinal data.
+
+### References
+* Arnau Gras, J., & Bono Cabré, R. (2008). Longitudinal studies: design and analysis models. Escritos de Psicología, 2(1), 32–41. <https://doi.org/10.24310/espsiescpsi.v2i1.13356>
+
+* Pinheiro, J., Bates, D., DebRoy, S., Sarkar, D., & R Core Team. (2026). lmeControl: Control values for lme fit (nlme package, version 3.1-168) [Computer software]. RDocumentation. <https://www.rdocumentation.org/packages/nlme/versions/3.1-168/topics/lmeControl>
+
+
+### Appendix
+
+```{r AE2 AP}
+library(reshape)
+library(tidyr)
+library(dplyr)
+library(ggplot2)
+
+# Convert the data frame format from wide to long
+datos_long <- datos %>%
+  pivot_longer(
+    cols = c(visual0, visual4, visual12, visual24, visual52),
+    names_to = "time",
+    values_to = "visual"
+  )
+
+datos_long$time <- as.numeric(gsub("visual", "", datos_long$time)) #convierto los tiempos a númerico
+
+dim(datos_long)
+head(datos_long)
+str(datos_long)
+
+# Creation of the baseline subset
+baseline <- datos_long %>%
+  filter(time == 0) %>%
+  select(subject, visual0 = visual)
+
+# Creation of the ARMD data frame, removing baseline visual acuity measurements
+armd <- datos_long %>%
+  filter(time > 0) %>%
+  left_join(baseline, by = "subject") %>%
+  droplevels()
+
+
+armd$time.f <- factor(armd$time) #creación del factor tiempo
+
+
+# Polynomial contrasts
+armd <-
+  within(armd,
+         {
+           contrasts(time.f) <- contr.poly(4, scores = c(4, 12, 24, 52))
+         })
+head(armd)
+
+# Plot of visual acuity measurements over time for 5 selected patients from each group
+
+set.seed(51)
+
+pacientes <- datos %>%
+  group_by(treat.f) %>%
+  slice_sample(n = 5) %>%
+  pull(subject)
+
+datos_plot <- subset(datos_long, subject %in% pacientes)
+
+
+ggplot(datos_plot,
+       aes(x = time,
+           y = visual,
+           group = subject,
+           colour = factor(subject))) +
+  geom_line() +
+  geom_point() +
+  facet_wrap(~ treat.f) +
+  labs(x = "Timr (weeks)",
+       y = "Visual Acuity",
+       colour = "Patient") +
+  theme_bw()
+
+```
+
+```{r AE3AP}
+
+# Inspection of missing values
+table(datos$miss.pat)
+```
+
+```{r AE4AP}
+
+# Mean and median visual acuity by time and treatment
+
+datos_long$time.f <- factor(datos_long$time) # Creation of the time factor
+
+# Number of non-missing visual acuity measurements
+attach(datos_long)
+flst <- list(time.f, treat.f)
+
+# Number of non-missing observations
+(tN <- 
+ tapply(visual, flst,
+ FUN = function(x) length(x[!is.na(x)])))
+
+# Mean and median visual acuity
+tMn <- tapply(visual, flst, FUN = mean, na.rm = TRUE) # Means
+tMd <- tapply(visual, flst, FUN = median, na.rm = TRUE) # Medians
+
+colnames(res <- cbind(tN, tMn, tMd)) # Column names
+
+nms1 <- rep(c("P", "A"), 3)
+nms2 <- rep(c("n", "Mean", "Mdn"), rep(2, 3))
+
+colnames(res) <- paste(nms1, nms2, sep = ":") # New column names
+
+res
+```
+
+```{r AE5AP}
+
+# Boxplots
+library(lattice)
+
+bw1 <- bwplot(visual ~ time.f | treat.f, data = datos_long)
+xlims <- c("Base", "4\nwks", "12\nwks", "24\nwks", "52\nwks")
+update(bw1, xlim = xlims, pch = "|")
+detach(package:lattice)
+
+
+```
+
+```{r AE6AP}
+# Analysis of missing data patterns
+
+mnt.pat <- c("----", "---X", "--XX", "-XXX", "XXXX")
+
+datos.mnt <- subset(datos, miss.pat %in% mnt.pat)
+dim(datos.mnt)
+
+# Number of patients with each missing data pattern by group
+with(datos.mnt, {
+  fl <- list(treat.f, miss.pat)
+  tapply(subject, fl, FUN=function(x) length(x[!is.na(x)]))
+})
+
+```
+
+```{r AE7AP}
+
+# Variance-covariance matrix for patients without missing values
+var(datos[, c("visual0","visual4","visual12","visual24","visual52")],
+    use = "complete.obs")
+
+# Correlation matrix for patients without missing values
+cor(datos[, c("visual0","visual4","visual12","visual24","visual52")],
+    use = "complete.obs")
+
+# Scatterplot matrix
+pairs(
+  na.omit(datos[, c("visual0","visual4","visual12","visual24","visual52")])
+)
+```
+
+```{r AE8AP}
+library(dplyr)
+library(nlme)
+
+armd2 <- na.omit(armd) # Remove missing values to fit the mixed-effects model
+
+# Model specification
+lm.fix <- formula(visual ~ visual0 + time + treat.f + treat.f:time)
+
+lm.mix <- lme(lm.fix, random = ~1|subject, data = armd2)
+summary(lm.mix)
+
+# Check the grouping structure of the model (repeated measurements per subject)
+getGroupsFormula(lm.mix)
+
+# Grouping factor
+str(grpF <- getGroups(lm.mix))
+
+# Explore the first values of the grouping factor
+grpF[1:17]
+
+# Display the first levels of the grouping factor
+levels(grpF)[1:5]
+
+# Range of observations per individual
+range(xtabs(~grpF))
+```
+
+```{r AE12AP}
+library(lattice)
+
+# Conditional Pearson residuals plot
+plot(lm.mix2)
+
+# Pearson residual plots and boxplots by time and treatment
+plot(lm.mix2,
+     resid(., type = "pearson") ~ time | treat.f,
+     id = 0.05)
+
+bwplot(resid(lm.mix2, type = "p") ~ time.f | treat.f,
+       data = armd2)
+
+# Normal Q-Q plots of Pearson residuals and predicted random effects
+qqnorm(lm.mix2, ~resid(.) | time.f)
+qqnorm(lm.mix2, ~ranef(.))
+
+# Plot of augmented predictions
+aug.Pred <- 
+  augPred(lm.mix2,
+          primary = ~time, 
+          level = 0:1, # Population-level and subject-specific predictions
+          length.out = 2)
+
+plot(aug.Pred, layout = c(4, 4, 1), 
+     key = list(lines = list(lty = c(1,2)),
+                text = list(c("Marginal", "Subject-specific")),
+                columns = 2))
+```
+
+```{r AE15AP}
+
+library(lattice)
+
+# Conditional Pearson residuals plot
+plot(lm.mix4)
+
+# Pearson residual plots and boxplots by time and treatment
+plot(lm.mix4,
+     resid(., type = "pearson") ~ time | treat.f,
+     id = 0.05)
+
+bwplot(resid(lm.mix3, type = "p") ~ time.f | treat.f,
+       data = armd2)
+
+# Normal Q-Q plots of Pearson residuals and predicted random effects
+qqnorm(lm.mix4, ~resid(.) | time.f)
+qqnorm(lm.mix4, ~ranef(.))
+
+# Plot of augmented predictions
+aug.Pred <- 
+  augPred(lm.mix4,
+          primary = ~time, 
+          level = 0:1, # Population-level and subject-specific predictions
+          length.out = 2)
+
+plot(aug.Pred, layout = c(4, 4, 1), 
+     key = list(lines = list(lty = c(1,2)),
+                text = list(c("Marginal", "Subject-specific")),
+                columns = 2))
+
+
+```
