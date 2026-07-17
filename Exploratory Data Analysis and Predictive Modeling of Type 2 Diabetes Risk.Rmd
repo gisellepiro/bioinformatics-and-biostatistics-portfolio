@@ -1,0 +1,687 @@
+---
+title: "Exploratory Data Analysis and Predictive Modeling of Type 2 Diabetes Risk"
+author: "Giselle Piro Martino"
+date: "2025-05-28"
+output: html_document
+---
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = TRUE, warning = TRUE, error = TRUE)
+
+```
+
+
+# Project Overview
+
+For this project, we selected the publicly available **Diabetes** dataset, available at [hbiostat.org/data](https://hbiostat.org/data). The dataset contains information collected from a study conducted in rural Virginia (USA), including data from 403 African American participants. The original study aimed to investigate the prevalence of Type 2 Diabetes, obesity, and other cardiovascular risk factors within this population.
+
+A total of 1,046 individuals were initially interviewed, of whom 403 were evaluated for diabetes. In the original study, Type 2 Diabetes was defined as a glycated hemoglobin (HbA1c, *glyhb*) value greater than 7.0, which was also adopted as the diagnostic criterion for this analysis.
+
+The dataset includes several demographic, anthropometric, and clinical variables, including:
+
+- Waist and hip circumference
+- Blood pressure
+- Total cholesterol and HDL cholesterol
+- Body frame size
+- Age
+- Glycated hemoglobin (HbA1c)
+
+Previous research has shown that obesity is strongly associated with the development of Type 2 Diabetes. Variables such as the waist-to-hip ratio have been proposed as potential predictors of both diabetes and cardiovascular disease. In addition, hypertension and diabetes are closely related conditions and are both considered components of the metabolic syndrome (formerly referred to as "Syndrome X").
+
+We selected this dataset for several reasons:
+
+- **Clinical relevance:** Type 2 Diabetes and cardiovascular disease represent major public health challenges worldwide. Analyzing real-world clinical data provides an opportunity to investigate important risk factors and gain meaningful insights into these conditions.
+
+- **Comprehensive dataset:** The dataset contains 19 variables of different types, allowing the application of a wide range of data analysis techniques, including data cleaning, exploratory data analysis, visualization, statistical modeling, and machine learning.
+
+- **Underrepresented population:** The study focuses on African American individuals living in rural communities, a population that has historically been underrepresented in medical research. Working with these data also highlights the importance of improving health equity through data-driven research.
+
+## Project Objectives
+
+The main objective of this study is to identify factors associated with a diagnosis of Type 2 Diabetes.
+
+Specifically, the analysis aims to:
+
+- Explore the relationship between waist-to-hip ratio, body mass index (BMI), blood pressure, cholesterol levels, and diabetes status.
+- Identify potential clinical predictors of Type 2 Diabetes.
+- Develop and evaluate predictive models capable of estimating diabetes risk based on the available clinical variables.
+
+## Dataset and Data Availability
+
+The dataset is provided in CSV format, one of the most widely used formats for data analysis.
+
+This is a publicly available dataset that can be freely used for academic and research purposes.
+
+## References
+
+[https://hbiostat.org/data/repo/diabetes](https://hbiostat.org/data/repo/diabetes)
+
+[https://pubmed.ncbi.nlm.nih.gov/9258308/](https://pubmed.ncbi.nlm.nih.gov/9258308/)
+
+[https://pubmed.ncbi.nlm.nih.gov/9258308/](https://pubmed.ncbi.nlm.nih.gov/9258308/)
+
+[https://search.r-project.org/CRAN/refmans/Publish/html/Diabetes.html](https://search.r-project.org/CRAN/refmans/Publish/html/Diabetes.html)
+
+
+```{r section_1}
+#Instalamos y cargamos los paquetes necesarios
+if (!requireNamespace("readr", quietly = TRUE)) {
+    install.packages("readr")} #para importar el dataset
+
+if (!requireNamespace("tidyverse", quietly = TRUE)) {
+    install.packages("tidyverse")} #para manipulación y visualización de datos
+
+library(readr)
+library(tidyverse)
+
+
+#Importamos el dataset con formato CSV
+diabetes_dataset <- read_csv("https://hbiostat.org/data/repo/diabetes.csv")
+
+
+```
+
+# Data Import
+
+The dataset was imported directly from the online repository as a CSV file using the `read_csv()` function.
+
+The following section summarizes the structure and main characteristics of the dataset.
+
+```{r section_2_2_1}
+# Display the first six rows of the dataset
+head(diabetes_dataset)
+
+# Display the number of observations and variables
+dim(diabetes_dataset)
+
+# Display the variable names
+names(diabetes_dataset)
+
+# Examine the structure of the dataset
+str(diabetes_dataset)
+
+# Generate a statistical summary
+summary(diabetes_dataset)
+
+# Check whether the dataset is NULL
+table(is.null(diabetes_dataset))
+
+# Check for missing values
+table(is.na(diabetes_dataset))
+
+# Count missing values for each variable
+colSums(is.na(diabetes_dataset))
+
+# Remove variables bp.2s and bp.2d because approximately 65% of their values are missing
+diabetes_dataset <- subset(diabetes_dataset, select = -c(bp.2s, bp.2d))
+
+# Convert gender and frame to categorical variables
+diabetes_dataset$gender <- as.factor(diabetes_dataset$gender)
+diabetes_dataset$frame <- as.factor(diabetes_dataset$frame)
+
+# Verify that gender and frame have been converted to factors
+str(diabetes_dataset)
+
+# Calculate Body Mass Index (BMI)
+diabetes_dataset$bmi <- diabetes_dataset$weight * 703 / (diabetes_dataset$height^2)
+
+# Calculate waist-to-hip ratio
+diabetes_dataset$waist_hip_ratio <- diabetes_dataset$waist / diabetes_dataset$hip
+
+# Create a binary variable indicating diabetes status based on HbA1c > 7.0
+diabetes_dataset$diabetic <- ifelse(diabetes_dataset$glyhb > 7.0, "Yes", "No")
+diabetes_dataset$diabetic <- as.factor(diabetes_dataset$diabetic)
+
+# Create a categorical variable indicating cholesterol level
+diabetes_dataset$chol_level <- ifelse(diabetes_dataset$chol >= 200, "High", "Normal")
+diabetes_dataset$chol_level <- as.factor(diabetes_dataset$chol_level)
+
+# Verify that the new variables have been added successfully
+diabetes_dataset
+
+# Generate an updated statistical summary
+summary(diabetes_dataset)
+
+# Filter patients diagnosed with diabetes
+diabetes_dataset_diabetic <- filter(diabetes_dataset, diabetic == "Yes")
+
+diabetes_dataset_diabetic
+
+# Generate a statistical summary of fasting blood glucose levels
+summary(select(diabetes_dataset_diabetic, stab.glu))
+
+```
+Data Cleaning and Feature Engineering
+
+The dataset contains 403 observations and 19 variables, including numerical and categorical clinical measurements.
+
+An initial exploratory analysis showed that participants ranged in age from 19 to 92 years, with a mean age of approximately 46.9 years. The average Body Mass Index (BMI) was 28.8 kg/m², which falls within the overweight range according to the World Health Organization classification. This observation supports the relevance of investigating the relationship between obesity and Type 2 Diabetes.
+
+The dataset contained 575 missing values, primarily concentrated in the variables bp.2s (second systolic blood pressure measurement) and bp.2d (second diastolic blood pressure measurement). Because both variables had 262 missing values out of 403 observations (approximately 65% missingness), they were removed from the analysis to reduce potential bias in subsequent statistical modeling.
+
+Several preprocessing steps were performed:
+
+frame (body frame size) was converted from a character variable to a categorical factor because it represents the categories small, medium, and large.
+
+gender was also converted to a categorical factor for statistical analysis and visualization purposes.
+
+In addition, the following derived variables were created:
+
+BMI (Body Mass Index): calculated from weight and height to estimate overweight and obesity status.
+
+waist_hip_ratio: calculated as waist circumference divided by hip circumference, providing an indicator of abdominal fat distribution.
+
+diabetic: a binary categorical variable indicating diabetes status, defined as glycated hemoglobin (HbA1c, glyhb) greater than 7.0.
+
+chol_level: a categorical variable classifying cholesterol levels as High (≥ 200 mg/dL) or Normal (< 200 mg/dL) to facilitate comparisons in subsequent analyses.
+
+Finally, patients classified as diabetic were filtered into a separate subset to enable targeted exploratory analyses of variables such as age and blood glucose levels. This subgroup analysis helps identify patterns and trends associated with diabetes within the study population.
+
+
+## References
+
+
+[https://stat.ethz.ch/R-manual/R-devel/library/base/html/ifelse.html](https://stat.ethz.ch/R-manual/R-devel/library/base/html/ifelse.html)
+
+[https://stat.ethz.ch/R-manual/R-devel/library/base/html/factor.html](https://stat.ethz.ch/R-manual/R-devel/library/base/html/factor.html)
+
+[https://www.cdc.gov/growth-chart-training/hcp/using-bmi/body-mass-index.html#:~:text=Metric%20units%3A%20BMI%20%3D%20weight%20(,)%20%2F%20%5Bheight%20(m)%5D&text=Metric%20units%3A%20BMI%20%3D%20%5Bweight,in)%5D2%20x%20703](https://www.cdc.gov/growth-chart-training/hcp/using-bmi/body-mass-index.html#:~:text=Metric%20units%3A%20BMI%20%3D%20weight%20(,)%20%2F%20%5Bheight%20(m)%5D&text=Metric%20units%3A%20BMI%20%3D%20%5Bweight,in)%5D2%20x%20703)
+
+[https://www.who.int/es/news-room/fact-sheets/detail/obesity-and-overweight](https://www.who.int/es/news-room/fact-sheets/detail/obesity-and-overweight)
+
+# Research Questions
+
+The analysis was designed to address the following research questions:
+
+1. What is the prevalence of Type 2 Diabetes within the study population?
+2. Is there an association between Body Mass Index (BMI) and the diagnosis of Type 2 Diabetes?
+3. How do glycated hemoglobin (HbA1c) levels vary across different age groups? Is age a potential risk factor for Type 2 Diabetes?
+4. What is the relationship between systolic and diastolic blood pressure and diabetes status?
+5. Does the waist-to-hip ratio differ between diabetic and non-diabetic individuals?
+6. Is there an association between the cholesterol-to-HDL ratio and the presence of Type 2 Diabetes?
+7. Can a predictive model be developed to estimate the risk of Type 2 Diabetes using the available clinical variables?
+
+# Exploratory Data Analysis and Statistical modelling
+
+The dataset was analyzed to address the research questions outlined above. The analysis includes descriptive statistics, data visualization, statistical hypothesis testing, and predictive modeling to investigate factors associated with Type 2 Diabetes.
+
+```{r section_3_3_1}
+# Load required packages
+if (!requireNamespace("dplyr", quietly = TRUE)) {
+    install.packages("dplyr")} # Data manipulation functions
+library(dplyr)
+
+if (!requireNamespace("ggplot2", quietly = TRUE)) {
+    install.packages("ggplot2")}  # Data visualization
+library(ggplot2)
+
+if (!requireNamespace("knitr", quietly = TRUE)) {
+    install.packages("knitr")} # Create formatted tables
+library(knitr)
+
+View(diabetes_dataset) # Open the dataset in a separate tab for easier exploration
+
+# ------------------------------------------------------------
+# Research Question 1: What is the prevalence of Type 2 Diabetes?
+# ------------------------------------------------------------
+
+# Calculate the total number of participants
+total_personas <- total_personas <- length(diabetes_dataset$diabetic)
+
+# Count participants diagnosed with diabetes
+total_diabeticos <- sum(diabetes_dataset$diabetic == "yes", na.rm = TRUE)
+
+# Count missing values
+total_na <- sum(is.na(diabetes_dataset$diabetic))
+
+# Display the results
+total_personas
+total_diabeticos
+total_na
+
+# Calculate the prevalence of diabetes
+proporcion_diabeticos <- total_diabeticos/total_personas*100
+cat("Prevalence of Type 2 Diabetes:", round(proporcion_diabeticos, 2), "%\n")
+
+
+# ------------------------------------------------------------
+# Research Question 2: Is BMI associated with diabetes?
+# ------------------------------------------------------------
+
+# Summary statistics for BMI
+summary(diabetes_dataset$bmi)
+
+# Histogram of BMI by diabetes status
+ggplot(diabetes_dataset, aes(bmi)) + 
+  geom_histogram(binwidth=5, fill="blue", col="black")+
+  facet_grid(~diabetic)
+  labs(title = "Histograma del IMC por diagnóstico de diabetes",
+       x = "IMC",
+       y = "Frecuencia")
+  
+
+# Boxplot comparing BMI between diabetic and non-diabetic participants
+boxplot(bmi ~ diabetic, data = diabetes_dataset,
+        main = "IMC según diagnóstico de diabetes",
+        xlab = "Diagnóstico de diabetes",
+        ylab = "IMC",
+        col = c("lightgreen", "lightpink"))
+
+# Scatter plot of BMI versus glycated hemoglobin (HbA1c)
+ggplot(diabetes_dataset, aes(x = bmi, y = glyhb)) +
+  geom_point(color = "violet") +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(title = "Relación entre IMC y Hemoglobina Glicosilada",
+       x = "Edad",
+       y = "Hemoglobina Glicosilada (%)")
+
+# Calculate Pearson's correlation coefficient
+cor.test(diabetes_dataset$bmi, diabetes_dataset$glyhb)
+
+# Fit a simple linear regression model
+modelreg_bmi <- lm(glyhb~bmi, data = diabetes_dataset)
+summary(modelreg_bmi)
+
+
+# ------------------------------------------------------------
+# Research Question 3: Is age associated with HbA1c levels?
+# ------------------------------------------------------------
+
+# Summary statistics for age
+
+summary(diabetes_dataset$age)
+
+# Summary statistics for diabetic participants only
+summary(diabetes_dataset_diabetic$age)
+
+# Density plot comparing age distributions
+ggplot(diabetes_dataset, aes(x = age, fill = diabetic)) +
+  geom_density(alpha = 0.5) +
+  labs(title = "Age Distribution by Diabetes Status",
+       x = "Age (years)", fill = "Diabetes Status")
+
+# Scatter plot of age versus HbA1c
+ggplot(diabetes_dataset, aes(x = age, y = glyhb)) +
+  geom_point(color = "violet") +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(title = "Relationship Between Age and HbA1c",
+       x = "Age (years)",
+       y = "HbA1c (%)")
+
+# Calculate Pearson's correlation coefficient
+cor.test(diabetes_dataset$age, diabetes_dataset$glyhb)
+
+# Fit a simple linear regression model
+
+modelreg_age <- lm(glyhb~age, data = diabetes_dataset)
+summary(modelreg_age)
+
+# ------------------------------------------------------------
+# Research Question 4: Blood pressure and diabetes
+# ------------------------------------------------------------
+
+# Boxplot of systolic blood pressure by diabetes status
+
+boxplot(bp.1s ~ diabetic, data = diabetes_dataset,
+        main = "Systolic Blood Pressure by Diabetes Status",
+        xlab = "Diabetes Status",
+        ylab = "Systolic Blood Pressure (mmHg)",
+        col = c("lightgreen", "lightpink"))
+
+# Summary statistics for systolic blood pressure
+
+summary(subset(diabetes_dataset, diabetic == "yes")$bp.1s) #diabetics
+
+summary(subset(diabetes_dataset, diabetic == "no")$bp.1s) #non diabetics
+
+
+
+# Scatter plot of systolic blood pressure versus HbA1c
+ggplot(diabetes_dataset, aes(x = bp.1s, y = glyhb)) +
+  geom_point(color = "violet") +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(
+    title = "Relationship Between Systolic Blood Pressure and HbA1c",
+    x = "Systolic Blood Pressure (mmHg)",
+    y = "HbA1c (%)"
+  )
+
+# Calculate Pearson's correlation coefficient
+cor.test(diabetes_dataset$bp.1s, diabetes_dataset$glyhb)
+
+# Fit a simple linear regression model
+modelreg_bp.1s <- lm(glyhb~bp.1s, data = diabetes_dataset)
+summary(modelreg_bp.1s)
+
+# Boxplot of diastolic blood pressure by diabetes status
+boxplot(bp.1d ~ diabetic, data = diabetes_dataset,
+        main = "Diastolic Blood Pressure by Diabetes Status",
+        xlab = "Diabetes Status",
+        ylab = "Diastolic Blood Pressure (mmHg)",
+        col = c("lightgreen", "lightpink"))
+
+
+# Summary statistics for diastolic blood pressure
+
+summary(subset(diabetes_dataset, diabetic == "yes")$bp.1d) # diabéticos
+
+summary(subset(diabetes_dataset, diabetic == "no")$bp.1d) #no diabéticos
+
+
+# ------------------------------------------------------------
+# Research Question 5: Waist-to-hip ratio and diabetes
+# ------------------------------------------------------------
+
+# Calculate summary statistics by sex because normal ranges differ
+diabeticos_ambos_generos <- subset(diabetes_dataset, diabetic == "yes") # diabetics both genders
+no_diabeticos_ambos_generos <- subset(diabetes_dataset, diabetic == "no") # non diabetics both genders
+
+# Female participants
+diabeticos_female <- subset(diabeticos_ambos_generos, gender == "female")
+summary(diabeticos_female$waist_hip_ratio)
+
+no_diabeticos_female <- subset(no_diabeticos_ambos_generos, gender == "female")
+summary(no_diabeticos_female$waist_hip_ratio)
+
+
+
+# Scatter plot for females
+
+diabetes_data_mujeres <- subset(diabetes_dataset, gender == "female")
+
+ggplot(diabetes_data_mujeres, aes(x = waist_hip_ratio, y = glyhb)) +
+  geom_point(color = "violet") +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(
+    title = "Relationship Between Waist-to-Hip Ratio and HbA1c in Women",
+    x = "Waist-to-Hip Ratio",
+    y = "HbA1c (%)"
+  )
+
+# Calculate Pearson's correlation coefficient
+cor.test(diabetes_data_mujeres$waist_hip_ratio, diabetes_data_mujeres$glyhb)
+
+# Fit a linear regression model
+
+modelreg_waist_hip_mujeres <- lm(glyhb~waist_hip_ratio, data = diabetes_data_mujeres)
+summary(modelreg_waist_hip_mujeres)
+
+
+
+# Male participants
+diabeticos_male <- subset(diabeticos_ambos_generos, gender == "male")
+summary(diabeticos_male$waist_hip_ratio)
+
+
+no_diabeticos_male <- subset(no_diabeticos_ambos_generos, gender == "male")
+summary(no_diabeticos_male$waist_hip_ratio)
+
+
+# Scatter plot for males
+
+diabetes_data_hombres <- subset(diabetes_dataset, gender == "male")
+
+ggplot(diabetes_data_hombres, aes(x = waist_hip_ratio, y = glyhb)) +
+  geom_point(color = "violet") +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(
+    title = "Relationship Between Waist-to-Hip Ratio and HbA1c in Men",
+    x = "Waist-to-Hip Ratio",
+    y = "HbA1c (%)"
+  )
+
+# Calculate Pearson's correlation coefficient
+cor.test(diabetes_data_hombres$waist_hip_ratio, diabetes_data_hombres$glyhb)
+
+# Fit a linear regression model
+
+modelreg_waist_hip_hombres <- lm(glyhb~waist_hip_ratio, data = diabetes_data_hombres)
+summary(modelreg_waist_hip_hombres)
+
+
+
+# Boxplots comparing waist-to-hip ratio by diabetes status
+
+# Women
+boxplot(waist_hip_ratio ~ diabetic, data = subset(diabetes_dataset, gender == "female"),
+        main = "Waist-to-Hip Ratio by Diabetes Status in Women",
+        xlab = "Diabetes Status",
+        ylab = "Waist-to-Hip Ratio",
+        col = c("lightgreen", "lightpink"))
+
+# Men
+boxplot(waist_hip_ratio ~ diabetic, data = subset(diabetes_dataset, gender == "male"),
+        main = "Waist-to-Hip Ratio by Diabetes Status in Men",
+        xlab = "Diabetes Status",
+        ylab = "Waist-to-Hip Ratio",
+        col = c("lightgreen", "lightpink"))
+
+
+# ------------------------------------------------------------
+# Research Question 6: Cholesterol/HDL ratio and diabetes
+# ------------------------------------------------------------
+
+# Boxplot of cholesterol/HDL ratio by diabetes status
+
+
+boxplot(ratio ~ diabetic, data = diabetes_dataset,
+        main = "Cholesterol-to-HDL Ratio by Diabetes Status",
+        xlab = "Diabetes Status",
+        ylab = "Cholesterol-to-HDL Ratio",
+        col = c("lightgreen", "lightpink"))
+
+# Summary statistics
+
+summary(subset(diabetes_dataset, diabetic == "yes")$ratio) # diabéticos
+
+summary(subset(diabetes_dataset, diabetic == "no")$ratio) #no diabéticos
+
+
+# Scatter plot
+ggplot(diabetes_dataset, aes(x = ratio, y = glyhb)) +
+  geom_point(color = "violet") +
+  geom_smooth(method = "lm", color = "blue") +
+  labs(
+    title = "Relationship Between Cholesterol-to-HDL Ratio and HbA1c",
+    x = "Cholesterol-to-HDL Ratio",
+    y = "HbA1c (%)"
+  )
+
+
+# Calculate Pearson's correlation coefficient
+cor.test(diabetes_dataset$ratio, diabetes_dataset$glyhb)
+
+# Fit a linear regression model
+modelreg_ratio <- lm(glyhb~ratio, data = diabetes_dataset)
+summary(modelreg_ratio)
+
+# ------------------------------------------------------------
+# Research Question 7: Predicting diabetes risk
+# ------------------------------------------------------------
+
+# Examine correlations among predictor variables
+variables <- diabetes_dataset[, c("bmi", "age", "bp.1s", "waist_hip_ratio", "ratio")]
+variables <- na.omit(variables)
+cor(variables)
+
+
+# Fit a multiple linear regression model
+model_reg_multiple <- lm(glyhb ~ bmi + age + bp.1s + waist_hip_ratio + ratio, data = diabetes_dataset)
+
+summary(model_reg_multiple)
+
+# Fit an alternative model including fasting blood glucose
+model_reg_multiple_bis <- lm(glyhb ~ age + ratio + stab.glu, data = diabetes_dataset)
+
+summary(model_reg_multiple_bis)
+
+```
+
+
+
+## Exploratory Data Analysis and Statistical Modeling
+
+The prevalence of Type 2 Diabetes in the study population was **14.89%**. Among the 403 participants included in the dataset, diabetes diagnosis was unavailable for 13 individuals.
+
+The mean Body Mass Index (BMI) was **28.78 kg/m²**, with values ranging from **15.20** to **55.78 kg/m²**. According to the Centers for Disease Control and Prevention [CDC](https://www.cdc.gov/healthyweight/spanish/assessing/bmi/adult_bmi/index.html), BMI categories are:
+
+| BMI (kg/m²) | Weight Category |
+|--------------|----------------|
+| <18.5 | Underweight |
+| 18.5–24.9 | Normal weight |
+| 25.0–29.9 | Overweight |
+| ≥30.0 | Obesity |
+
+Within our sample, approximately 25% of participants had a normal BMI or were underweight, while another 25% were classified as obese. The median BMI was **27.80 kg/m²**, indicating that the study population tended toward overweight. BMI values were missing for six participants. Furthermore, the histogram showed that diabetic individuals tended to have higher BMI values than non-diabetic participants.
+
+The boxplot also demonstrated higher BMI values among diabetic participants. Pearson's correlation coefficient indicated a weak but statistically significant positive correlation between BMI and HbA1c levels. This finding was confirmed by the simple linear regression model, which explained only **1.7%** of the variability in HbA1c. Therefore, although BMI is associated with HbA1c, its predictive ability is limited, suggesting that additional predictors should be considered.
+
+The mean age of the study population was **46.85 years**, whereas the mean age of participants diagnosed with Type 2 Diabetes was **58.40 years**. These findings suggest that age may be associated with the diagnosis of Type 2 Diabetes. The density plot also supports this relationship.
+
+The scatter plot of age versus HbA1c suggests a positive linear relationship between these variables. Pearson's correlation coefficient indicated a weak but statistically significant correlation (p < 0.05), suggesting that although age influences HbA1c levels, it is not a strong predictor when considered alone.
+
+The simple linear regression model was statistically significant and showed that age explained **11.5%** of the variability in HbA1c.
+
+To evaluate the relationship between blood pressure and diabetes status, we examined descriptive statistics and boxplots. Mean systolic blood pressure was **147.8 mmHg** among diabetic participants and **135.2 mmHg** among non-diabetic participants. According to the [American Heart Association](https://www.heart.org/-/media/files/health-topics/answers-by-heart/answers-by-heart-spanish/what-is-highbloodpressure_span.pdf), systolic blood pressure values above **130 mmHg** are considered hypertensive. Approximately **75%** of diabetic participants were hypertensive, compared with approximately **50%** of non-diabetic participants. These findings suggest a possible association between systolic blood pressure and Type 2 Diabetes.
+
+The scatter plot also suggested a positive linear relationship between systolic blood pressure and HbA1c. Pearson's correlation coefficient indicated a weak but statistically significant correlation. Likewise, the simple linear regression model was statistically significant but explained only **3.9%** of the variability in HbA1c.
+
+In contrast, diastolic blood pressure showed no meaningful differences between diabetic and non-diabetic participants. Therefore, this variable does not appear to be a useful predictor of diabetes in this dataset.
+
+The boxplots of the waist-to-hip ratio suggested differences between diabetic and non-diabetic participants, indicating that abdominal fat distribution may be associated with Type 2 Diabetes.
+
+Because normal waist-to-hip ratio ranges differ between men and women, the analyses were performed separately by sex. In women, the normal range is **0.71–0.84**. Among diabetic women, the first quartile was **0.8461**, indicating that at least **75%** of diabetic women were above the upper limit of the normal range. In contrast, among non-diabetic women, the first quartile was **0.8043**, while the median exceeded the upper normal limit, indicating that approximately **50%** were above the recommended threshold.
+
+The scatter plot suggested a positive linear relationship between waist-to-hip ratio and HbA1c in women. Pearson's correlation coefficient (**r = 0.21**) indicated a weak but statistically significant association. The simple linear regression model was also statistically significant and showed that waist-to-hip ratio explained **4.5%** of the variability in HbA1c among women.
+
+For men, the normal waist-to-hip ratio ranges from **0.78 to 0.94**. Among diabetic men, approximately **50%** were above the upper normal limit, whereas only **25%** of non-diabetic men exceeded this threshold.
+
+Pearson's correlation coefficient also showed a weak but statistically significant association (p < 0.05). The simple linear regression model indicated that waist-to-hip ratio explained only **2.4%** of the variability in HbA1c among men.
+
+Overall, these findings suggest that waist-to-hip ratio may be associated with Type 2 Diabetes, although additional predictors should also be considered.
+
+The cholesterol-to-HDL ratio was higher among diabetic participants, suggesting a possible association between this variable and diabetes status.
+
+The scatter plot suggested a positive linear relationship between the cholesterol-to-HDL ratio and HbA1c. Pearson's correlation coefficient (**r = 0.33**) indicated a weak but statistically significant correlation. The simple linear regression model was statistically significant and showed that the cholesterol-to-HDL ratio explained **10.8%** of the variability in HbA1c.
+
+Several variables appeared to be associated with HbA1c levels and, consequently, with the diagnosis of Type 2 Diabetes, although none of them alone provided strong predictive power.
+
+A multiple linear regression model was therefore fitted using BMI, age, systolic blood pressure, waist-to-hip ratio, and the cholesterol-to-HDL ratio as predictors. Before fitting the model, a correlation matrix was calculated. A moderate positive correlation was observed between age and systolic blood pressure, whereas weak positive correlations were found between BMI and the cholesterol-to-HDL ratio, and between waist-to-hip ratio and the cholesterol-to-HDL ratio.
+
+The model achieved an **R² of 0.2089**, indicating that it explained approximately **21%** of the variability in HbA1c. Although this value is relatively modest, such results are common in biological data. The overall model was statistically significant. Among the predictors, only **age** and the **cholesterol-to-HDL ratio** remained statistically significant.
+
+Interestingly, several variables that were statistically significant in the simple linear regression analyses were no longer significant in the multiple regression model. This can be explained by the fact that simple linear regression evaluates the relationship between a single predictor and the outcome without accounting for potential confounding variables. For example, as shown in the correlation matrix, age and systolic blood pressure were positively correlated. Consequently, the statistical significance observed for systolic blood pressure in the simple regression model was largely explained by age. In contrast, multiple linear regression estimates the independent effect of each predictor while controlling for the others, causing systolic blood pressure to lose statistical significance.
+
+Although the model explained part of the variability in HbA1c, additional predictors were likely required to improve its performance. Therefore, a second multiple linear regression model was fitted by including fasting blood glucose together with age and the cholesterol-to-HDL ratio. This model achieved an **R² of 0.589**, indicating that it explained approximately **59%** of the variability in HbA1c. All three predictors were statistically significant.
+
+Overall, these findings suggest that, within this study population, **age**, the **cholesterol-to-HDL ratio**, and **fasting blood glucose** are the strongest predictors of Type 2 Diabetes.
+
+## References
+
+[https://www.clinicalondres.es/blog/nutricion/medicion-calculo-cintura-cadera-ayudaran-saber-sobrepeso.html#:~:text=Seg%C3%BAn%20algunos%20estudios%20el%20ICC,o%20riesgo%20de%20enfermedades%20coronarias.&text=Para%20poder%20identificar%20nuestro%20resultado,0%2C94%20normal%20para%20hombres.](https://www.clinicalondres.es/blog/nutricion/medicion-calculo-cintura-cadera-ayudaran-saber-sobrepeso.html#:~:text=Seg%C3%BAn%20algunos%20estudios%20el%20ICC,o%20riesgo%20de%20enfermedades%20coronarias.&text=Para%20poder%20identificar%20nuestro%20resultado,0%2C94%20normal%20para%20hombres.)
+
+
+[Fuente: https://www.statlearning.com/](https://www.statlearning.com/)
+
+## Probability Analysis and Statistical Simulation
+
+```{r section_3_3_2}
+# ------------------------------------------------------------
+# Custom function
+# ------------------------------------------------------------
+
+# Define a function to calculate the mean fasting blood glucose
+# among participants diagnosed with diabetes
+calculate_mean_glucose_diabetic <- function(diabetes_dataset){
+
+  # Filter fasting blood glucose values for diabetic participants
+  glucose_diabetic <- diabetes_dataset$stab.glu[diabetes_dataset$diabetic == "yes"]
+
+  # Calculate the mean, ignoring missing values
+  mean_glucose_diabetic <- mean(glucose_diabetic, na.rm = TRUE)
+
+  return(mean_glucose_diabetic)
+}
+
+# Test the function
+calculate_mean_glucose_diabetic(diabetes_dataset)
+
+
+# ------------------------------------------------------------
+# Probability calculations
+# ------------------------------------------------------------
+
+# Calculate the probability that at least 50 participants
+# in the sample have diabetes.
+# A binomial distribution is used:
+# P(X ≥ 50) = 1 − P(X ≤ 49)
+
+p <- 0.1489      # Diabetes prevalence estimated in Section 3.1
+n <- 403         # Sample size
+
+prob_diabetic_over_50 <- 1 - pbinom(49, n, p)
+
+prob_diabetic_over_50
+
+
+# Calculate the probability that a randomly selected participant
+# has a fasting blood glucose level less than or equal to 100 mg/dL.
+# Blood glucose is assumed to follow a normal distribution.
+
+mu <- mean(diabetes_dataset$stab.glu, na.rm = TRUE)
+sigma <- sd(diabetes_dataset$stab.glu, na.rm = TRUE)
+
+prob_glucose_under_100 <- pnorm(100, mu, sigma)
+
+prob_glucose_under_100
+
+
+# ------------------------------------------------------------
+# Monte Carlo simulation
+# ------------------------------------------------------------
+
+# Simulate 1,000 samples of 40 participants each and calculate
+# the proportion of participants with high cholesterol in each sample.
+# Then compute the mean and standard deviation of these proportions.
+
+set.seed(123)   # Set seed for reproducibility
+
+sample_size <- 40
+num_replications <- 1000
+
+# Simulate the proportion of participants with high cholesterol
+simulation <- replicate(num_replications, {
+
+  sample_data <- sample(diabetes_dataset$chol_level,
+                        sample_size,
+                        replace = TRUE)
+
+  mean(sample_data == "High", na.rm = TRUE)
+
+})
+
+simulation
+
+# Calculate the mean and standard deviation of the simulated proportions
+mean_proportion <- mean(simulation)
+sd_proportion <- sd(simulation)
+
+cat("Mean proportion of participants with high cholesterol:", mean_proportion, "\n")
+cat("Standard deviation:", sd_proportion, "\n")
+
+```
+
+### Results
+
+### Custom Function
+
+The mean fasting blood glucose level among participants diagnosed with Type 2 Diabetes was **194.17 mg/dL**, which is well above the upper limit of the normal fasting blood glucose range (**100 mg/dL**) according to the Mayo Clinic.
+
+### Probability Calculations
+
+The probability that **at least 50 participants** in the sample have Type 2 Diabetes was **93%**.
+
+The probability that a randomly selected participant has a fasting blood glucose level **less than or equal to 100 mg/dL** (i.e., within the normal range) was **45%**.
+
+### Monte Carlo Simulation
+
+The Monte Carlo simulation estimated a **mean proportion of 54.18%** of participants with high cholesterol across the simulated samples. The estimated **standard deviation** of these proportions was **0.0785**.
