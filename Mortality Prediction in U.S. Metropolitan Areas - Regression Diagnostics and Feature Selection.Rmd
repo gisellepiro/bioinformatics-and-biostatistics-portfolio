@@ -1,0 +1,1543 @@
+---
+title: "Mortality Prediction in U.S. Metropolitan Areas: Regression Diagnostics and Feature Selection"
+author: "Giselle Piro Martino"
+date: "2026-01-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = TRUE, warning = TRUE, error = TRUE)
+
+```
+
+# Regression Diagnostics and Variable Selection for Mortality Prediction
+
+## Introduction
+
+This study analyzes the metropolitan mortality dataset originally compiled by McDonald and Schwing (1973), which contains mortality measurements and fifteen explanatory variables collected from 60 metropolitan areas in the United States between 1959 and 1961. The dataset is available in the `mcdonald` data frame included in the bestglm package for R.
+
+The response variable, **MORT**, represents the mortality measure of interest, while the remaining variables are considered potential predictors. The primary objective of this study is to identify the variables that contribute most significantly to explaining variations in mortality rates across metropolitan areas.
+
+A major challenge of this dataset is the presence of substantial correlation among several explanatory variables, which may lead to multicollinearity issues and unstable parameter estimates in ordinary least squares (OLS) regression models. Consequently, model diagnostics and variable selection techniques play a central role in the analysis.
+
+To focus exclusively on model interpretation and selection procedures, the dataset is not divided into training and test subsets. Instead, all observations are used throughout the analysis.
+
+## Objectives
+
+The analysis is structured around the following objectives:
+
+1. **Regression diagnostics**
+
+   * Fit an initial OLS regression model using all available predictors.
+   * Analyze residual behavior and identify influential observations.
+   * Remove the most influential observation and reassess model performance.
+
+2. **Multicollinearity assessment**
+
+   * Explore pairwise relationships among explanatory variables.
+   * Evaluate the condition number of the design matrix.
+   * Compute Variance Inflation Factors (VIFs) to identify problematic predictors.
+   * Discuss potential strategies to mitigate multicollinearity.
+
+3. **Variable selection**
+
+   * Apply backward elimination based on the F-test.
+   * Perform backward and forward stepwise procedures using the Akaike Information Criterion (AIC).
+   * Identify candidate models using AIC optimization.
+   * Evaluate alternative subsets using Adjusted R².
+   * Perform model selection using Mallows' Cp criterion.
+
+4. **Model comparison and interpretation**
+
+   * Compare the models obtained through the different selection strategies.
+   * Propose a reduced and interpretable OLS model.
+   * Compare the final reduced model with the full specification while accounting for multicollinearity issues.
+
+The final goal is to obtain a parsimonious and interpretable regression model capable of explaining mortality variability while minimizing redundancy among predictors.
+
+
+```{r Ej1a}
+
+# Load package and dataset
+install.packages("bestglm")
+library(bestglm)
+data("mcdonald")
+
+# Initial exploratory analysis
+?mcdonald
+head(mcdonald)
+str(mcdonald)
+summary(mcdonald)
+
+hist(mcdonald$MORT,
+     main = "Distribution of MORT",
+     xlab = "MORT")
+
+boxplot(mcdonald$MORT,
+        main = "Boxplot of MORT")
+
+# Fit the full linear model
+modelmc <- lm(MORT ~ ., data = mcdonald)
+summary(modelmc)
+
+# Residual diagnostics
+
+## Normality
+plot(modelmc, which = 2) # No clear deviations from residual normality are observed
+
+shapiro.test(residuals(modelmc))
+# p-value > 0.05: no evidence against the normality assumption
+
+## Homoscedasticity
+require(lmtest)
+
+plot(modelmc, which = 1)
+# No clear evidence of heteroscedasticity, although some outliers are visible
+
+bptest(modelmc)
+# p-value < 0.05: evidence of heteroscedasticity
+
+## Random errors
+# Assumed to hold given the original study design and data collection process
+
+## High leverage points
+leverage <- hatvalues(modelmc)
+
+p <- length(coef(modelmc)) - 1  # Number of predictors
+n <- nrow(mcdonald)             # Number of observations
+
+lev_critical <- 2 * (p + 1) / n
+lev_critical
+# Observations above this threshold are considered high leverage points
+
+high_leverage <- leverage > lev_critical
+
+indices <- which(high_leverage)
+indices
+
+mcdonald[indices, ]
+
+### High leverage plot
+plot(leverage,
+     type = "h",
+     main = "Leverage Values",
+     ylab = "Leverage")
+
+abline(h = lev_critical,
+       col = "red",
+       lty = 2)  # Critical threshold
+
+### Highlight high leverage observations
+points(which(leverage > lev_critical),
+       leverage[leverage > lev_critical],
+       col = "blue",
+       pch = 19)
+
+text(which(leverage > lev_critical),
+     leverage[leverage > lev_critical],
+     labels = rownames(mcdonald)[leverage > lev_critical],
+     pos = 3,
+     cex = 0.8)
+
+### Outlier detection
+#### Identify outliers using externally studentized residuals
+resid_student <- rstudent(modelmc)
+
+outliers <- which(abs(resid_student) > 2) # Potential outliers
+outliers
+
+#### Outlier plot
+fitted_vals <- fitted(modelmc)
+
+plot(fitted_vals,
+     resid_student,
+     ylim = c(-3, 3),
+     xlab = "Fitted Values",
+     ylab = "Externally Studentized Residuals",
+     main = "Outlier Detection")
+
+abline(h = c(-2, 0, 2),
+       col = c("red", "black", "red"),
+       lty = 2)  # ±2 threshold
+
+# Influential observations:
+# combination of large residuals and high leverage (Cook's distance)
+cooks <- cooks.distance(modelmc)
+
+max_cooks <- which.max(cooks)
+max_cooks
+# Observation 29 is the most influential observation
+
+mcdonald[max_cooks, ]
+
+# Remove observation 29 from subsequent analyses
+mcdonald_new <- mcdonald[-29, ]
+
+
+```
+
+
+```{r Ej1 multicolinealidad , fig.width=16, fig.height=16}
+
+# Multicollinearity assessment
+
+## i) Select predictor variables only
+predictors <- mcdonald_new[, -which(names(mcdonald_new) == "MORT")]
+
+# Pairwise correlation plots
+pairs(
+  predictors,
+  main = "Pairwise Correlations Among Predictor Variables",
+  pch = 19,
+  cex = 0.6,
+  col = "blue"
+)
+
+# Correlation matrix
+cor_matrix <- cor(predictors)
+round(cor_matrix, 2)
+
+## ii) Compute the condition number of the design matrix
+
+# Fit the model using the dataset after removing the most influential observation
+modelmc_new <- lm(MORT ~ ., data = mcdonald_new)
+summary(modelmc_new)
+
+# Design matrix excluding the intercept
+x <- model.matrix(modelmc_new)[, -1]
+
+# Condition number
+kappa(x)
+
+## iii) Variance Inflation Factors (VIFs)
+# Measure the degree of multicollinearity associated with each predictor
+require(car)
+vif(modelmc_new)
+
+```
+
+
+An initial exploratory analysis was conducted to understand the characteristics of the dataset and determine whether any preprocessing or variable transformations were required. All variables were continuous and numerical, and no missing values were detected. Consequently, no transformations were considered necessary prior to model fitting.
+
+An ordinary least squares (OLS) regression model including all available predictors was then fitted. The model was globally significant, with an overall p-value of 2.193 × 10⁻⁹, and explained approximately 68.47% of the variability in the mortality response variable (MORT).
+
+Residual diagnostics indicated that the normality assumption was reasonably satisfied. Regarding homoscedasticity, the residuals versus fitted values plot did not reveal clear evidence of non-constant variance; however, the Breusch–Pagan test detected statistically significant heteroscedasticity. This apparent discrepancy may be attributable to the presence of influential observations or outliers, which were investigated in subsequent diagnostic analyses.
+
+Influence diagnostics identified observation 29 as the most influential data point according to Cook's distance. After removing this observation, the model was refitted using the remaining data. The resulting model remained globally significant and explained approximately 67.7% of the variability in MORT.
+
+
+
+## Multicollinearity Assessment
+
+### Pairwise Correlations
+
+Pairwise correlations among the explanatory variables revealed substantial relationships between several predictors, suggesting the presence of multicollinearity within the dataset.
+
+The strongest correlations were observed for the following variable pairs:
+
+* **HC – NOX**: strong positive correlation, close to perfect.
+
+* **POOR – NONW**: strong positive correlation.
+
+* **EDUC – WWDRK**: strong positive correlation.
+
+* **HOUS – POOR**: strong negative correlation.
+
+* **JULT – POOR**: strong positive correlation.
+
+* **NONW – OVR65**: strong negative correlation.
+
+* **POOR – JANT**: strong positive correlation.
+
+
+These relationships are consistent with the socioeconomic and environmental characteristics represented by the variables. For example, **HC** and **NOX** are both associated with industrial activity and atmospheric pollution, making their strong positive relationship expected. Similarly, **POOR** and **NONW** may capture related dimensions of socioeconomic disadvantage, while **EDUC** and **WWDRK** likely reflect the association between educational attainment and occupational structure. The negative relationship between **HOUS** and **POOR** is also intuitive, as poorer areas generally tend to exhibit lower housing quality indicators.
+
+Overall, the correlation structure suggests that multicollinearity may affect the stability and interpretability of ordinary least squares coefficient estimates, motivating a more formal assessment using condition numbers and variance inflation factors.
+
+### Condition Number
+
+The condition number of the design matrix for the ordinary least squares model was **29,107.91**. This value is substantially larger than the commonly used thresholds for detecting multicollinearity, indicating the presence of severe collinearity among the explanatory variables.
+
+Such a high condition number suggests that the regression coefficients may be unstable and highly sensitive to small changes in the data, potentially affecting both model interpretation and statistical inference.
+
+
+
+### Variance Inflation Factors
+
+The Variance Inflation Factors (VIFs) confirmed the presence of multicollinearity among several predictors.
+
+The variables **HC** and **NOX** exhibited severe multicollinearity, with VIF values exceeding 10, indicating a high degree of redundancy with other explanatory variables.
+
+A second group of variables, namely **JANT**, **OVR65**, **EDUC**, **NONW**, and **POOR**, showed moderate multicollinearity, with VIF values between 5 and 10.
+
+The remaining predictors displayed relatively low levels of collinearity, with VIF values below 5.
+
+### Discussion and Potential Remedies
+
+The combined evidence from the correlation analysis, the large condition number, and the elevated VIF values indicates that multicollinearity is a substantial issue in this dataset. In particular, the extremely high VIF values observed for **HC** and **NOX** suggest that coefficient estimates associated with these variables may be unstable and difficult to interpret.
+
+Several approaches may be considered to address multicollinearity. A straightforward strategy consists of removing redundant predictors or combining highly correlated variables based on substantive knowledge of the problem domain. Alternatively, variable selection procedures may be employed, including testing-based approaches such as backward elimination, forward selection, and stepwise regression, as well as criterion-based methods including AIC, BIC, adjusted R², and Mallows' Cp.
+
+Regularization and dimensionality reduction techniques may also provide effective solutions. Examples include Principal Component Analysis (PCA), Partial Least Squares (PLS), Ridge regression, and Lasso regression.
+
+
+```{r Ej1b}
+
+#b
+
+summary(modelmc_new)
+
+# Sort by decreasing por p-value
+pvals <- summary(modelmc_new)$coefficients[-1, 4]
+which.max(pvals)
+
+
+# Backward elimination F Fisher
+
+modelmc_new1 <- update(modelmc_new, . ~ . -WWDRK)
+summary(modelmc_new1)
+
+pvals <- summary(modelmc_new1)$coefficients[-1, 4]
+which.max(pvals)
+
+modelmc_new2 <- update(modelmc_new1, . ~ . -POOR)
+summary(modelmc_new2)
+
+pvals <- summary(modelmc_new2)$coefficients[-1, 4]
+which.max(pvals)
+
+modelmc_new3 <- update(modelmc_new2, . ~ . -HOUS)
+summary(modelmc_new3)
+
+pvals <- summary(modelmc_new3)$coefficients[-1, 4]
+which.max(pvals)
+
+modelmc_new4 <- update(modelmc_new3, . ~ . -SOx)
+summary(modelmc_new4)
+
+pvals <- summary(modelmc_new4)$coefficients[-1, 4]
+which.max(pvals)
+
+modelmc_new5 <- update(modelmc_new4, . ~ . -HUMID)
+summary(modelmc_new5)
+
+pvals <- summary(modelmc_new5)$coefficients[-1, 4]
+which.max(pvals)
+
+modelmc_new6 <- update(modelmc_new5, . ~ . -DENS)
+summary(modelmc_new6)
+
+pvals <- summary(modelmc_new6)$coefficients[-1, 4]
+which.max(pvals)
+
+modelmc_new7 <- update(modelmc_new6, . ~ . -OVR65)
+summary(modelmc_new7)
+
+pvals <- summary(modelmc_new7)$coefficients[-1, 4]
+which.max(pvals)
+
+modelmc_new8 <- update(modelmc_new7, . ~ . -PREC)
+summary(modelmc_new8)
+
+##Stepwise:
+step(lm(MORT~.,data=mcdonald_new),direction="backward")
+
+modelsetp <- lm(MORT~PREC + JANT + JULT + OVR65 + POPN + EDUC + NONW + HC + NOX, data = mcdonald_new)
+summary(modelsetp)
+
+
+# Forward elimination
+model_cero <- lm(MORT~1, data = mcdonald_new)
+step(model_cero, scope = formula(lm(MORT ~ ., data = mcdonald_new)), direction = "forward")
+
+model_forward <- lm(MORT~NONW + EDUC + SOx + JANT + PREC + JULT + POPN, data = mcdonald_new)
+summary(model_forward)
+
+
+```
+
+
+## Variable Selection Procedures
+
+A classical backward elimination procedure based on the F-test was first applied. Non-significant predictors were removed sequentially, starting with the variable exhibiting the largest p-value, and the model was refitted after each removal step.
+
+This process resulted in a reduced model containing seven statistically significant predictors: **JANT**, **JULT**, **POPN**, **EDUC**, **NONW**, **HC**, and **NOX**. Compared with the full model, these predictors exhibited lower p-values while maintaining a similar level of explanatory power, as measured by the coefficient of determination (R²).
+
+Backward selection was subsequently repeated using the Akaike Information Criterion (AIC), which seeks an appropriate balance between model fit (low residual sum of squares) and model complexity. The AIC-based procedure selected a model containing nine predictors: **PREC**, **JANT**, **JULT**, **OVR65**, **POPN**, **EDUC**, **NONW**, **HC**, and **NOX**.
+
+Finally, a forward selection procedure based on AIC was performed. This approach produced a model with seven predictors: **NONW**, **EDUC**, **SOx**, **JANT**, **PREC**, **JULT**, and **POPN**. Although the resulting model contained the same number of predictors as the F-test backward elimination approach, the selected variables were not identical.
+
+Overall, the three selection procedures yielded models with comparable residual sum of squares (RSS) and adjusted R² values, suggesting that several competing specifications provide a similar level of explanatory performance.
+
+
+```{r Ej1c}
+# AIC-based model selection
+require(leaps)
+
+amod <- regsubsets(MORT ~ ., data = mcdonald_new)
+model_summary <- summary(amod)
+
+# Selected predictors for each subset size
+model_summary$which
+
+n <- nrow(mcdonald_new)
+k <- length(model_summary$rss)  # Number of candidate models
+p <- k + 1                      # Number of parameters (including intercept)
+
+# Compute AIC for each model size
+AIC <- n * log(model_summary$rss / n) + (2:p) * 2
+AIC
+
+## AIC plot
+plot(
+  AIC ~ I(1:k),
+  xlab = "Number of Predictors",
+  ylab = "AIC",
+  main = "AIC Across Model Sizes"
+)
+
+## Identify the predictors included in the best six-variable model
+model_summary$outmat[6, ]
+
+# Fit the model selected according to the AIC criterion
+modelaic <- lm(
+  MORT ~ PREC + JANT + JULT + EDUC + NONW + SOx,
+  data = mcdonald_new
+)
+
+summary(modelaic)
+
+```
+
+
+### AIC-Based Model Selection
+
+The AIC profile indicated that the minimum AIC value was achieved for models containing either six or seven predictors, with the corresponding AIC values being nearly identical. Following the principle of parsimony, the six-predictor model was selected as the preferred specification.
+
+The variables included in this model were **PREC**, **JANT**, **JULT**, **EDUC**, **NONW**, and **SOx**.
+
+
+```{r Ej1d}
+
+# Adjusted R² criterion
+model_summary$adjr2
+
+# Plot adjusted R² as a function of model size
+plot(
+  1:k,
+  model_summary$adjr2,
+  xlab = "Number of Predictors",
+  ylab = "Adjusted R²",
+  main = "Adjusted R² Across Model Sizes"
+)
+
+## Identify the predictors included in the best six-variable model
+model_summary$which[6, ]
+
+# Fit the model selected according to the adjusted R² criterion
+modelr2 <- lm(
+  MORT ~ PREC + JANT + JULT + EDUC + NONW + SOx,
+  data = mcdonald_new
+)
+
+summary(modelr2)
+```
+
+### Adjusted R² Criterion
+
+The model with the highest adjusted R² contained eight predictors. However, its performance was very similar to that of the six- and seven-predictor models, with only marginal improvements in explanatory power.
+
+Following the principle of parsimony, the six-predictor model was selected as the preferred specification. This model included the variables **PREC**, **JANT**, **JULT**, **EDUC**, **NONW**, and **SOx**.
+
+
+```{r Ej1e}
+# Mallows' Cp criterion
+model_summary$cp
+
+# Plot Mallows' Cp as a function of the number of parameters
+plot(
+  2:p,
+  model_summary$cp,
+  xlab = "Number of Parameters",
+  ylab = "Mallows' Cp",
+  main = "Mallows' Cp Across Model Sizes"
+)
+
+# Reference line corresponding to Cp = p
+abline(0, 1)
+
+## Identify the predictors included in the selected five-variable model
+model_summary$outmat[5, ]
+
+# Fit the model selected according to Mallows' Cp
+modelcp <- lm(
+  MORT ~ PREC + JANT + EDUC + NONW + SOx,
+  data = mcdonald_new
+)
+
+summary(modelcp)
+
+```
+
+### Mallows' Cp Criterion
+
+According to Mallows' Cp, the optimal model consisted of six parameters, corresponding to five predictor variables plus the intercept. The selected predictors were **PREC**, **JANT**, **EDUC**, **NONW**, and **SOx**.
+
+```{r Ej1f}
+
+# Summary of the selected models obtained from different selection procedures
+
+## Backward elimination based on the F-test
+summary(modelmc_new8)
+
+## Backward selection based on AIC
+summary(modelsetp)
+
+## Forward selection based on AIC
+summary(model_forward)
+
+## Best model according to the AIC criterion
+summary(modelaic)
+
+## Best model according to the adjusted R² criterion
+summary(modelr2)
+
+## Best model according to Mallows' Cp
+summary(modelcp)
+
+# Nested ANOVA comparison between the reduced and full models
+anova(modelr2, modelmc_new)
+
+```
+
+
+## Model Comparison and Final Model Selection
+
+All candidate models were globally significant and achieved adjusted R² values close to that of the full model, indicating that substantial model simplification could be achieved with only a minor reduction in explanatory power.
+
+Interestingly, the models selected according to the AIC and adjusted R² criteria were identical, both including the predictors **PREC**, **JANT**, **JULT**, **EDUC**, **NONW**, and **SOx**.
+
+Given the strong multicollinearity identified during the diagnostic stage, particular attention was paid to avoiding models containing **HC** and **NOX**, whose extremely high correlation and VIF values suggested substantial redundancy. Consequently, the models obtained through backward elimination using either the F-test or AIC were discarded, as both retained these problematic predictors.
+
+Among the remaining alternatives, the forward AIC model was excluded on parsimony grounds because it included an additional predictor that was not statistically significant.
+
+The final comparison therefore involved the models selected by Mallows' Cp and by the AIC/adjusted R² criteria. Although the Mallows' Cp model provided a more compact specification with five predictors, the AIC/adjusted R² model was preferred because it achieved a better balance between parsimony, predictor significance, and robustness against multicollinearity issues.
+
+In particular, excluding **JULT**, as proposed by the Mallows' Cp model, could result in the loss of relevant explanatory information and a slight deterioration in model fit.
+
+Finally, a nested ANOVA comparison between the reduced and full models produced a p-value greater than 0.05, indicating that the additional predictors included in the full specification did not provide a statistically significant improvement in explanatory performance.
+
+Therefore, the final selected model consisted of the following six predictors:
+
+* **PREC**
+* **JANT**
+* **JULT**
+* **EDUC**
+* **NONW**
+* **SOx**
+
+This reduced model achieved a satisfactory compromise between interpretability, predictive performance, and model stability.
+
+
+
+# Robust Regression Analysis
+
+## Introduction
+
+The previous analysis identified an influential observation and proposed a reduced ordinary least squares (OLS) model after removing this data point from the estimation process. While this approach is useful for understanding the effect of influential observations, excluding data points is not always desirable in practical applications.
+
+The objective of this section is therefore to revisit the reduced model using the complete dataset of 60 observations and investigate whether robust regression methods can mitigate the influence of extreme observations without requiring their removal.
+
+## Objectives
+
+The analysis is structured around the following steps:
+
+1. **Residual diagnostics of the reduced OLS model**
+
+   * Fit the reduced model using all available observations.
+   * Perform a residual analysis to identify outliers, high-leverage observations, and influential points.
+
+2. **Robust regression using Huber M-estimators**
+
+   * Re-estimate the reduced model using robust regression based on the M-estimators proposed by Peter J. Huber.
+   * Compare the estimated coefficients with those obtained from the classical OLS model.
+   * Assess whether the observed differences are consistent with the presence of influential observations.
+   * Identify observations receiving reduced weights under the robust estimation procedure and compare these results with the residual diagnostics from the OLS model.
+
+3. **Resistant regression using Least Trimmed Squares (LTS)**
+
+   * Estimate the model using the Least Trimmed Squares method.
+   * Compare the resulting estimates with those obtained using Huber's M-estimators and ordinary least squares regression.
+
+4. **Statistical inference**
+
+   * Construct 95% confidence intervals for the coefficients of the robust model.
+   * Identify statistically significant predictors based on these intervals.
+
+The goal of this analysis is to evaluate the robustness of the conclusions obtained in the previous section and determine whether influential observations materially affect the estimated relationships between the predictors and mortality.
+
+
+```{r Ej2a}
+
+# Fit the reduced model using the complete dataset
+# Reduced model including all observations
+modelred <- lm(
+  MORT ~ PREC + JANT + JULT + EDUC + NONW + SOx,
+  data = mcdonald
+)
+
+summary(modelred)
+
+# Residual diagnostics
+
+## Normality
+plot(modelred, which = 2)
+# No clear deviations from residual normality are observed
+
+shapiro.test(residuals(modelred))
+# p-value > 0.05: no evidence against the normality assumption
+
+## Homoscedasticity
+require(lmtest)
+
+plot(modelred, which = 1)
+# No clear evidence of heteroscedasticity
+
+bptest(modelred)
+# p-value > 0.05: no evidence of heteroscedasticity
+
+## Random errors
+# Assumed to hold given the original study design and data collection process
+
+## High leverage points
+leverage <- hatvalues(modelred)
+
+p <- length(coef(modelred)) - 1  # Number of predictors
+n <- nrow(mcdonald)              # Number of observations
+
+lev_critical <- 2 * (p + 1) / n
+lev_critical
+# Observations above this threshold are considered high leverage points
+
+high_leverage <- leverage > lev_critical
+high_leverage
+
+indices <- which(high_leverage)
+indices
+
+mcdonald[indices, ]
+
+### High leverage plot
+plot(
+  leverage,
+  type = "h",
+  main = "Leverage Values",
+  ylab = "Leverage"
+)
+
+abline(
+  h = lev_critical,
+  col = "red",
+  lty = 2
+)  # Critical threshold
+
+### Highlight high leverage observations
+points(
+  which(leverage > lev_critical),
+  leverage[leverage > lev_critical],
+  col = "blue",
+  pch = 19
+)
+
+text(
+  which(leverage > lev_critical),
+  leverage[leverage > lev_critical],
+  labels = rownames(mcdonald)[leverage > lev_critical],
+  pos = 3,
+  cex = 0.8
+)
+
+### Outlier detection
+#### Identify outliers using externally studentized residuals
+resid_student <- rstudent(modelred)
+resid_student
+
+outliers <- which(abs(resid_student) > 2)  # Potential outliers
+outliers
+
+#### Outlier plot
+fitted_vals <- fitted(modelred)
+
+plot(
+  fitted_vals,
+  resid_student,
+  ylim = c(-3, 3),
+  xlab = "Fitted Values",
+  ylab = "Externally Studentized Residuals",
+  main = "Outlier Detection"
+)
+
+abline(
+  h = c(-2, 0, 2),
+  col = c("red", "black", "red"),
+  lty = 2
+)  # ±2 threshold
+
+# Influential observations:
+# combination of large residuals and high leverage (Cook's distance)
+cooks <- cooks.distance(modelred)
+
+# Rank observations according to their influence
+sort(cooks, decreasing = TRUE)
+
+# Common rule of thumb for influential observations
+which(cooks > 4 / n)
+
+# Four most influential observations
+mcdonald[c(37, 32, 28, 6), ]
+
+```
+
+
+### Residual Diagnostics
+
+The residual diagnostics indicated that the assumptions of normality and homoscedasticity were reasonably satisfied. The assumption of independent random errors was also considered appropriate given the design and data collection process of the original study.
+
+Several observations exhibited high leverage, defined as observations with unusual or extreme combinations of predictor values. Using the threshold value of 0.23, a number of high-leverage points were identified, with observation 32 standing out as the most extreme case.
+
+Outlier detection based on externally studentized residuals identified observations 2, 28, and 37 as potential outliers.
+
+Finally, the most influential observations, defined as those combining large residuals with high leverage, were identified using Cook's distance. Observations 37, 32, 28, and 6 showed the highest influence on the fitted model and therefore had the potential to substantially affect both the estimated coefficients and the overall model fit.
+
+
+```{r Ej2b}
+
+require(MASS)
+model_hm <- rlm(MORT~PREC + JANT + JULT + EDUC + NONW + SOx, data = mcdonald)
+summary(model_hm)
+
+```
+
+### Robust Regression Using Huber M-Estimators
+
+The coefficient estimates obtained from the Huber robust regression model were very similar to those produced by the ordinary least squares model. This result suggests that the presence of observations with atypical residuals does not substantially affect the estimation of the regression coefficients.
+
+Huber's M-estimator reduces the influence of observations with large residuals, that is, observations that behave as outliers in the response variable. However, it does not directly penalize observations with high leverage arising from extreme values in the explanatory variables.
+
+In the present case, the observations previously identified as outliers received lower weights under the robust estimation procedure, whereas observations whose influence was primarily driven by unusual predictor values were not necessarily downweighted. This behavior is consistent with the residual analysis presented in the previous section, which identified only a small number of moderate outliers.
+
+Consequently, the similarity between the OLS and Huber coefficient estimates is an expected result and suggests that the conclusions obtained from the classical regression model are relatively robust to the presence of atypical observations.
+
+
+```{r Ej2cd}
+# Least Trimmed Squares (LTS) regression
+require(robustbase)
+
+model_lts <- ltsreg(
+  MORT ~ PREC + JANT + JULT + EDUC + NONW + SOx,
+  data = mcdonald
+)
+
+model_lts
+
+# Estimate 95% confidence intervals for the coefficients using bootstrap
+
+ncol <- length(coef(model_lts))  # Number of coefficients
+
+# Matrix to store bootstrap coefficient estimates
+bcoef <- matrix(
+  0,
+  nrow = 1000,
+  ncol = ncol
+)
+
+colnames(bcoef) <- names(coef(model_lts))
+
+set.seed(123)
+
+for (i in 1:1000) {
+
+  # Generate a new response variable by adding
+  # bootstrap-resampled residuals to the fitted values
+  y_new <- predict(model_lts) +
+    residuals(model_lts)[sample(
+      nrow(mcdonald),
+      replace = TRUE
+    )]
+
+  # Refit the LTS model using the bootstrap sample
+  brg <- ltsreg(
+    y_new ~ PREC + JANT + JULT + EDUC + NONW + SOx,
+    data = mcdonald,
+    nsamp = "best"
+  )
+
+  # Store bootstrap coefficient estimates
+  bcoef[i, ] <- brg$coef
+}
+
+colnames(bcoef) <- names(coef(model_lts))
+
+# Compute bootstrap 95% confidence intervals
+IC_95 <- apply(
+  bcoef,
+  2,
+  quantile,
+  probs = c(0.025, 0.975)
+)
+
+IC_95
+
+
+```
+
+### Resistant Regression Using Least Trimmed Squares
+
+The Least Trimmed Squares (LTS) estimator computes regression coefficients by minimizing the sum of the smallest squared residuals, thereby providing stronger protection against extreme outliers than conventional OLS estimation or Huber's M-estimators.
+
+Compared with both the OLS and Huber robust regression models, the estimated coefficients changed only slightly, with the largest differences observed for the coefficients associated with **JULT** and **NONW**. This result suggests that the influential observations identified in the diagnostic analysis have only a limited impact on the estimated relationships.
+
+Overall, the similarity among the three estimation approaches indicates that the conclusions obtained from the original model are relatively stable and that the dataset does not contain sufficiently extreme observations to substantially alter the fitted relationships. Nevertheless, the LTS estimator provides additional protection against atypical observations and therefore offers a more resistant alternative to classical regression methods.
+
+### Confidence Intervals and Statistical Significance
+
+Bootstrap-based 95% confidence intervals were computed for the coefficients of the LTS model.
+
+According to these intervals, only the coefficients associated with **PREC**, **NONW**, and **SOx** remained statistically significant at the 5% significance level, as their confidence intervals did not include zero.
+
+
+# Piecewise Regression and Structural Nonlinearity
+
+## Introduction
+
+The regression models developed in the previous sections assumed a linear relationship between mortality and each explanatory variable. However, for some predictors this assumption may be overly restrictive, as the effect of a variable on mortality could change once a certain threshold or critical value is exceeded.
+
+To investigate this possibility, this section explores the presence of structural nonlinearities by introducing piecewise linear relationships within the multiple regression framework. Piecewise regression allows the slope associated with a predictor to change at a specific breakpoint while preserving interpretability and maintaining the simplicity of linear modeling.
+
+As in the robust regression analysis, the complete dataset of 60 observations is retained throughout this study.
+
+## Objectives
+
+The analysis is organized into two stages:
+
+1. **Identification of candidate variables for piecewise modeling**
+
+   * Apply a piecewise regression procedure to each predictor included in the final reduced model selected in Exercise 1.
+   * Evaluate the improvement in model fit obtained by allowing a breakpoint for each variable.
+   * Rank predictors according to the reduction in the Akaike Information Criterion (AIC).
+   * Identify the three variables producing the greatest improvements and select the variable associated with the largest decrease in AIC.
+
+2. **Robust piecewise regression**
+
+   * Fit a piecewise regression model for the selected predictor within the multiple regression framework.
+   * Explicitly specify the model formulation and interpret the coefficients associated with the piecewise component.
+   * Re-estimate the model using robust regression methods in order to reduce the influence of the influential observation identified in the previous analyses while retaining all 60 observations.
+   * Interpret the resulting parameter estimates and assess whether allowing for structural nonlinearity improves model performance and interpretability.
+
+The objective of this analysis is to determine whether introducing localized changes in slope provides a more realistic representation of the relationship between mortality and the selected explanatory variables.
+
+
+```{r Ej3}
+require(dplyr)
+
+summary(mcdonald)
+
+# Use the median as the breakpoint
+c <- median(mcdonald$PREC)
+
+# If PREC <= c, the piecewise term PREC_t is equal to zero
+# and therefore does not contribute to the model.
+# If PREC > c, PREC_t = PREC - c and the slope changes beyond the breakpoint.
+mcdonald$PREC_t <- pmax(0, mcdonald$PREC - c)
+
+mod_trozos <- lm(
+  MORT ~ PREC + PREC_t + JANT + JULT + EDUC + NONW + SOx,
+  data = mcdonald
+)
+
+summary(mod_trozos)
+AIC(mod_trozos)
+
+# Baseline linear model
+modelaic <- lm(
+  MORT ~ PREC + JANT + JULT + EDUC + NONW + SOx,
+  data = mcdonald
+)
+
+summary(modelaic)
+
+# Piecewise regression using a for loop
+vars <- c("PREC", "JANT", "JULT", "EDUC", "NONW", "SOx")
+
+# AIC of the baseline six-predictor model
+AIC_mod <- AIC(modelaic)
+AIC_mod
+
+# Empty dataframe to store results
+resultados <- data.frame(
+  variable = character(),
+  AIC_trozos = numeric()  # AIC obtained from the piecewise model
+)
+
+for (v in vars) {
+
+  # Use the median of the variable as the breakpoint
+  c <- median(mcdonald[[v]])
+
+  # The piecewise term is zero below the breakpoint
+  # and increases linearly above the breakpoint
+  mcdonald[[paste0(v, "_t")]] <- pmax(
+    0,
+    mcdonald[[v]] - c
+  )
+
+  # Piecewise model formula
+  formula_trozos <- as.formula(
+    paste(
+      "MORT ~ PREC + JANT + JULT + EDUC + NONW + SOx +",
+      paste0(v, "_t")
+    )
+  )
+
+  # Fit the piecewise regression model
+  mod_trozos <- lm(
+    formula_trozos,
+    data = mcdonald
+  )
+
+  # Store AIC values for each piecewise model
+  resultados <- rbind(
+    resultados,
+    data.frame(
+      variable = v,
+      AIC_trozos = AIC(mod_trozos)
+    )
+  )
+}
+
+# Rank models according to AIC improvement
+rdos <- resultados[order(resultados$AIC_trozos), ]
+
+# Display the three variables producing the lowest AIC values
+top3 <- rdos %>% head(3)
+print(top3)
+
+# Piecewise models based on the median breakpoint produced
+# larger AIC values than the original linear model.
+# This may indicate that the breakpoint location was not well chosen.
+# The segmented package estimates the breakpoint automatically.
+
+install.packages("segmented")
+library(segmented)
+library(dplyr)
+
+# Empty dataframe to store results
+resultados <- data.frame(
+  variable = character(),
+  AIC_trozos = numeric()  # AIC obtained from segmented regression
+)
+
+# Iterate over each candidate variable
+for (v in vars) {
+
+  # Initial breakpoint value (median)
+  bp_ini <- median(mcdonald[[v]])
+
+  # Estimate the breakpoint using segmented regression
+  mod_seg <- try(
+    segmented(
+      modelaic,                              # baseline linear model
+      seg.Z = as.formula(paste("~", v)),     # variable whose slope may change
+      psi = bp_ini                           # initial breakpoint value
+    )
+  )
+
+  # If the breakpoint cannot be estimated,
+  # an error message is returned
+  if (inherits(mod_seg, "try-error")) {
+    print(mod_seg)
+  }
+
+  # If estimation succeeds, store the results
+  if (!inherits(mod_seg, "try-error")) {
+    resultados <- rbind(
+      resultados,
+      data.frame(
+        variable = v,
+        AIC_trozos = AIC(mod_seg)
+      )
+    )
+  }
+}
+
+# Rank models according to AIC improvement
+rdos <- resultados[order(resultados$AIC_trozos), ]
+
+# Display the three variables producing the lowest AIC values
+top3 <- rdos %>% head(3)
+print(top3)
+```
+
+As an illustrative example, a piecewise regression model was fitted for **PREC** using the median value of the variable as the breakpoint. The results suggest that mortality increases with precipitation, although the strength of this relationship changes across the breakpoint.
+
+For precipitation values below or equal to 38, mortality increases relatively rapidly with precipitation, with an estimated slope of β₁ = 2.53488. Beyond this threshold, the relationship becomes considerably weaker, with the slope decreasing to β₁ + β₂ = 2.53488 − 2.14518 = 0.3897. This indicates that the effect of precipitation on mortality tends to level off once moderate precipitation levels have been reached.
+
+### Identification of Candidate Variables for Piecewise Modeling
+
+As an initial approach, piecewise regression models were fitted using the median of each predictor as the breakpoint. This strategy resulted in AIC values larger than those obtained from the corresponding linear model, suggesting that the chosen breakpoints were not optimal.
+
+To address this issue, the analysis was repeated using the `segmented` package, which estimates breakpoints directly from the data. The resulting rankings were consistent with those obtained using the median-based approach.
+
+Among the candidate predictors, **NONW**, **EDUC**, and **JANT** produced the lowest AIC values when modeled using piecewise regression. However, none of the segmented models provided a substantial reduction in AIC relative to the original linear specification.
+
+Therefore, the analysis does not provide sufficient evidence to support the presence of strong structural nonlinearities in the relationship between mortality and the explanatory variables included in the final model.
+
+
+
+```{r Ej3b}
+# The variable producing the largest AIC improvement
+# under piecewise regression was NONW
+
+library(segmented)
+library(MASS)
+
+# Baseline multiple linear regression model
+model_base <- lm(
+  MORT ~ PREC + JANT + JULT + EDUC + NONW + SOx,
+  data = mcdonald
+)
+
+# Estimate the breakpoint for NONW using segmented regression
+model_tr <- segmented(
+  model_base,
+  seg.Z = ~ NONW,
+  psi = median(mcdonald$NONW)  # Initial breakpoint value
+)
+
+summary(model_tr)
+
+# Re-estimate the model using Huber robust regression
+model_rob <- rlm(
+  MORT ~ PREC + JANT + JULT + EDUC + NONW + SOx,
+  data = mcdonald
+)
+
+# Estimate the breakpoint for NONW using segmented regression
+# applied to the robust model
+model_robt <- segmented(
+  model_rob,
+  seg.Z = ~ NONW,
+  psi = median(mcdonald$NONW)  # Initial breakpoint value
+)
+
+summary(model_robt)
+
+
+```
+
+## Piecewise Regression Model with a Breakpoint in NONW
+
+The variable **NONW** was selected for piecewise modeling because it produced the largest reduction in the AIC criterion among all candidate predictors.
+
+The resulting model can be written as:
+
+[
+\text{MORT} = \beta_0 + \beta_1 \text{PREC} + \beta_2 \text{JANT} + \beta_3 \text{JULT} + \beta_4 \text{EDUC} + \beta_5 \text{NONW} + \beta_6 (\text{NONW} - c)_+ + \beta_7 \text{SOx} + \varepsilon
+]
+
+where the piecewise term is defined as:
+
+[
+(\text{NONW} - c)_+ =
+\begin{cases}
+0 & \text{if } \text{NONW} \leq c \
+\text{NONW} - c & \text{if } \text{NONW} > c
+\end{cases}
+]
+
+In this formulation, (\beta_5) represents the effect of **NONW** on mortality before the breakpoint, while (\beta_6) measures the change in slope after the breakpoint. Consequently, the slope associated with **NONW** beyond the breakpoint becomes (\beta_5 + \beta_6).
+
+The estimated breakpoint was located at **NONW = 28.74**. Below this threshold, mortality increased as **NONW** increased. Above the breakpoint, however, the slope became slightly negative, suggesting that further increases in **NONW** were associated with a small decrease in mortality.
+
+The model was subsequently re-estimated using Huber robust regression in order to reduce the influence of potentially influential observations while retaining all 60 observations in the analysis. The robust segmented model produced essentially identical coefficient estimates and the same explanatory power as the classical piecewise regression model.
+
+This result indicates that the influential observations identified in previous analyses do not have a substantial impact on either the estimated breakpoint or the regression coefficients. Therefore, the evidence for a change in slope appears to be robust to the presence of atypical observations.
+
+Standard errors and p-values were not reported for the robust segmented model, as the `segmented` implementation does not provide automatic inferential procedures for robust regression objects. Nevertheless, the estimated coefficients and breakpoint remain directly interpretable.
+
+
+# Regularization and Dimensionality Reduction for Multicollinearity
+
+## Introduction
+
+The previous analyses revealed the presence of substantial multicollinearity among several explanatory variables. Although classical variable selection methods can alleviate this issue by removing redundant predictors, alternative approaches based on regularization and dimensionality reduction provide more systematic ways to handle highly correlated data while preserving information from the original predictors.
+
+This section investigates three widely used techniques designed to address multicollinearity:
+
+* **Principal Component Regression (PCR)**,
+* **Partial Least Squares Regression (PLS)**, and
+* **Ridge Regression**.
+
+Following the strategy adopted in Exercise 1, the influential observation previously identified is removed from the analysis prior to model fitting.
+
+## Data Preparation
+
+Before fitting the models, all explanatory variables are standardized to have zero mean and unit variance. Standardization is required because PCR, PLS, and Ridge regression are sensitive to the scale of the predictors.
+
+The standardized dataset is then randomly partitioned into:
+
+* a **training set** containing 70% of the observations, used for model estimation and hyperparameter selection, and
+* a **test set** containing the remaining 30%, reserved for out-of-sample performance evaluation.
+
+To ensure reproducibility, all random operations are performed using:
+
+```r
+set.seed(123)
+```
+
+The same random seed is reused in all subsequent analyses involving randomization.
+
+## Objectives
+
+The analysis is divided into three methodological blocks.
+
+### Principal Component Regression (PCR)
+
+The PCR analysis aims to:
+
+1. Fit a principal component regression model using the standardized predictors.
+2. Select the optimal number of principal components using cross-validation on the training set.
+3. Report:
+
+   * the selected number of components,
+   * the prediction error on the test set, and
+   * the proportion of predictor variance explained by the retained components.
+4. Assess whether a large proportion of explained predictor variance necessarily translates into improved predictive performance.
+
+### Partial Least Squares Regression (PLS)
+
+The PLS analysis aims to:
+
+1. Fit a partial least squares regression model using the standardized predictors.
+2. Select the optimal number of latent components using cross-validation.
+3. Report:
+
+   * the selected number of components,
+   * the prediction error on the test set, and
+   * the proportion of predictor variance explained by the retained components.
+4. Compare the results with those obtained using PCR and discuss the relationship between explained variance and predictive accuracy.
+
+### Ridge Regression
+
+The Ridge regression analysis aims to:
+
+1. Fit a Ridge regression model using the standardized predictors.
+2. Select the regularization parameter using cross-validation, considering:
+
+   * **λmin**, the value minimizing the cross-validation error, and
+   * **λ1se**, the largest value whose cross-validation error lies within one standard error of the minimum.
+3. Evaluate both models on the test set and report their prediction errors.
+4. Compare the results with those obtained from PCR and PLS.
+5. Discuss the effect of the regularization parameter λ on model complexity and predictive performance.
+
+The objective of this section is to compare different strategies for mitigating multicollinearity and to assess the trade-offs between model interpretability, dimensionality reduction, and predictive accuracy.
+
+
+```{r Ej4}
+
+# Standardize predictor variables
+mcdonaldstd <- data.frame(
+  scale(subset(mcdonald, select = -MORT))
+)
+
+mcdonaldstd$MORT <- mcdonald$MORT
+
+modstd <- lm(MORT ~ ., data = mcdonaldstd)
+summary(modstd)
+
+# Create training and test datasets
+set.seed(123)
+
+n <- nrow(mcdonaldstd)
+
+train_ind <- sample(
+  1:n,
+  size = 0.7 * n
+)
+
+train <- mcdonaldstd[train_ind, ]
+test <- mcdonaldstd[-train_ind, ]
+
+
+# -------------------------------------------------------------------------
+# Principal Component Regression (PCR)
+# -------------------------------------------------------------------------
+
+# Inspect principal components
+regresoras <- subset(train, select = -MORT)
+
+cpreg <- prcomp(regresoras)
+
+summary(cpreg)
+
+# Install and load the PLS package
+install.packages("pls")
+library(pls)
+
+# Fit PCR model
+set.seed(123)
+
+rcp1 <- pcr(
+  MORT ~ .,
+  data = train,
+  validation = "CV",
+  ncomp = 6
+)
+
+# Determine the optimal number of components
+rcp1CV <- RMSEP(
+  rcp1,
+  estimate = "CV"
+)
+
+plot(rcp1CV)
+
+rcp1CV
+
+# Index 7 corresponds to 6 components.
+# However, the prediction error is nearly identical
+# to that of the 3-component model, so the more
+# parsimonious solution is selected.
+which.min(rcp1CV$val)
+
+# Generate predictions on the test set
+pred_test <- predict(
+  rcp1,
+  test,
+  ncomp = 3
+)
+
+pred_test
+
+# Test-set prediction error
+rmse_testrcp <- sqrt(
+  mean((test$MORT - pred_test)^2)
+)
+
+rmse_testrcp
+
+# Proportion of predictor variance explained
+summary(rcp1)
+
+
+# -------------------------------------------------------------------------
+# Partial Least Squares Regression (PLS)
+# -------------------------------------------------------------------------
+
+set.seed(123)
+
+# Fit PLS model
+plsmod <- plsr(
+  MORT ~ .,
+  data = train,
+  validation = "CV"
+)
+
+# Determine the optimal number of components
+plsCV <- RMSEP(
+  plsmod,
+  estimate = "CV"
+)
+
+# Index 3 corresponds to 2 components
+which.min(plsCV$val)
+
+plot(plsCV)
+
+# Generate predictions on the test set
+pred_test <- predict(
+  plsmod,
+  test,
+  ncomp = 2
+)
+
+pred_test
+
+# Test-set prediction error
+rmse_testpls <- sqrt(
+  mean((test$MORT - pred_test)^2)
+)
+
+rmse_testpls
+
+# Proportion of predictor variance explained
+summary(plsmod)
+
+
+# -------------------------------------------------------------------------
+# Ridge Regression
+# -------------------------------------------------------------------------
+
+# Fit ridge regression models using a sequence
+# of regularization parameters
+set.seed(123)
+
+require(MASS)
+
+rgmod <- lm.ridge(
+  MORT ~ .,
+  data = train,
+  lambda = seq(0, 50, 0.001)
+)
+
+# Estimate prediction error for each lambda value
+# using Generalized Cross-Validation (GCV)
+nGCV <- which.min(rgmod$GCV)
+
+lGCV <- rgmod$lambda[nGCV]
+
+lGCV   # λmin
+
+GCV <- rgmod$GCV
+lambda <- rgmod$lambda
+
+GCVmin <- min(GCV)
+
+# Approximation to the one-standard-error rule
+sdGCV <- sd(GCV)
+
+# λ1se: largest lambda within one standard deviation
+# of the minimum GCV value
+lambda_1se <- max(
+  lambda[GCV <= GCVmin + sdGCV]
+)
+
+lambda_1se   # λ1se
+
+# Ridge trace plot:
+# coefficient estimates as a function of lambda
+matplot(
+  rgmod$lambda,
+  coef(rgmod),
+  type = "l",
+  ylim = c(-5, 5),
+  xlab = expression(lambda),
+  ylab = expression(hat(beta[i])),
+  col = 1
+)
+
+abline(v = lGCV, col = 2)
+abline(v = lambda_1se, col = 4, lty = 2)
+
+legend(
+  "topright",
+  legend = c("λmin", "λ1se"),
+  col = c(2, 4),
+  lty = c(1, 2)
+)
+
+# GCV as a function of lambda
+plot(
+  rgmod$lambda,
+  rgmod$GCV,
+  type = "l",
+  xlab = expression(lambda),
+  ylab = "GCV"
+)
+
+abline(v = lGCV, col = 2)
+
+
+# -------------------------------------------------------------------------
+# Test performance for λmin
+# -------------------------------------------------------------------------
+
+idx_min <- which.min(rgmod$GCV)
+
+# Extract coefficients corresponding to λmin
+coef_min <- rgmod$coef[, idx_min]
+
+# Select predictors from the test set
+regresorastest <- as.matrix(
+  subset(test, select = -MORT)
+)
+
+# Prediction using matrix multiplication
+# The intercept is not included because
+# predictors were centered during standardization
+pred_min <- regresorastest %*% coef_min
+
+pred_min
+
+# Test-set prediction error
+rmse_test <- sqrt(
+  mean((test$MORT - pred_min)^2)
+)
+
+rmse_test
+
+
+# -------------------------------------------------------------------------
+# Test performance for λ1se
+# -------------------------------------------------------------------------
+
+idx_1se <- which.min(rgmod$GCV)
+
+# Extract coefficients corresponding to λ1se
+fila <- which(
+  rgmod$lambda == lambda_1se
+)
+
+coef_1se <- coef(rgmod)[fila, ]
+
+coef_1se
+
+# Prediction using λ1se coefficients
+pred1se <- cbind(regresorastest) %*%
+  coef_1se[-1]
+
+pred1se
+
+# Test-set prediction error
+rmse_1se <- sqrt(
+  mean((test$MORT - pred1se)^2)
+)
+
+rmse_1se
+
+
+# -------------------------------------------------------------------------
+# Compute intercept and correct predictions
+# -------------------------------------------------------------------------
+
+# λmin
+int_min <- mean(train$MORT) -
+  colMeans(regresoras) %*% coef_min
+
+int_min <- as.numeric(int_min)
+
+# Recompute predictions including the intercept
+predmin <- regresorastest %*%
+  coef_min +
+  int_min
+
+predmin
+
+# Corrected test-set prediction error
+rmse_test <- sqrt(
+  mean((test$MORT - predmin)^2)
+)
+
+rmse_test
+
+
+# λ1se
+int_1se <- mean(train$MORT) -
+  colMeans(regresoras) %*%
+  coef_1se[-1]
+
+int_1se <- as.numeric(int_1se)
+
+# Recompute predictions including the intercept
+pred_1se <- regresorastest %*%
+  coef_min +
+  int_1se
+
+pred_1se
+
+# Corrected test-set prediction error
+rmse_test <- sqrt(
+  mean((test$MORT - pred_1se)^2)
+)
+
+rmse_test
+
+```
+
+### Principal Component Regression Results
+
+Cross-validation indicated that a model including the first three principal components provided an appropriate balance between predictive performance and model simplicity. Although models with a larger number of components achieved slightly lower cross-validation errors, the improvements were negligible and therefore the more parsimonious three-component solution was retained.
+
+The resulting PCR model achieved a prediction error of approximately **39.20** on the test set.
+
+The selected components explained **71.20%** of the total variance in the explanatory variables.
+
+### Relationship Between Explained Variance and Predictive Performance
+
+A high proportion of explained variance in the predictor variables does not necessarily imply superior predictive performance. Principal components are constructed to maximize the variance explained in the predictor matrix (X), rather than to maximize the relationship between the predictors and the response variable.
+
+Consequently, some components explaining only a small proportion of the variance in (X) may still contain substantial information about the response variable (Y), whereas components explaining a large amount of predictor variability may contribute little to prediction accuracy.
+
+For this reason, selecting components exclusively on the basis of explained variance may lead to suboptimal predictive models, highlighting the importance of cross-validation for determining the appropriate number of retained components.
+
+### Partial Least Squares Regression Results
+
+Cross-validation indicated that the first two latent components were sufficient to achieve the best predictive performance for the PLS model.
+
+The resulting model achieved a prediction error of approximately **34.00** on the test set.
+
+The selected components explained **47.13%** of the total variance in the explanatory variables.
+
+### Comparison Between PCR and PLS
+
+Compared with PCR, the PLS model explained a substantially smaller proportion of the variance in the predictor variables (**47.13%** for PLS versus **71.20%** for PCR), yet achieved a lower prediction error on the test set (**34.00** versus **39.20**, respectively).
+
+This result illustrates that maximizing the explained variance of the predictor matrix (X) does not necessarily lead to better predictive performance. PCR constructs components solely to capture variability in the predictors, whereas PLS explicitly incorporates information from the response variable (Y) when constructing latent components.
+
+As a consequence, PLS was able to achieve better predictive accuracy using fewer components, highlighting the advantage of supervised dimensionality reduction methods when prediction is the primary objective.
+
+### Ridge Regression Results
+
+Initial Ridge regression models produced extremely large prediction errors (approximately 930). This issue arose because only the predictor variables were standardized, whereas the response variable **MORT** remained on its original scale.
+
+For PCR and PLS, predictions are automatically transformed back to the original scale of the response variable by the corresponding software implementations. In contrast, Ridge regression using `lm.ridge()` requires the intercept to be manually reconstructed in order to return predictions to the original response scale.
+
+After computing the intercept and correcting the predictions accordingly, the following test-set prediction errors were obtained:
+
+* **λmin:** 37.02
+* **λ1se:** 37.36
+
+The predictive performance of Ridge regression therefore lies between that of PCR and PLS, outperforming PCR while remaining slightly less accurate than PLS on this dataset.
+
+
+### Effect of the Regularization Parameter in Ridge Regression
+
+In Ridge regression, the parameter ( \lambda ) controls the strength of the regularization applied to the model coefficients. Specifically, Ridge regression penalizes the coefficients proportionally to their squared magnitude, shrinking them toward zero as the value of ( \lambda ) increases.
+
+Small values of ( \lambda ) impose only a mild penalty, allowing the coefficients to retain relatively large values and enabling the model to fit the training data closely. When ( \lambda = 0 ), Ridge regression reduces to ordinary least squares regression.
+
+Conversely, large values of ( \lambda ) produce stronger shrinkage, reducing the magnitude of the regression coefficients without setting them exactly to zero. This typically leads to lower model variance and greater stability in the presence of multicollinearity, although at the cost of introducing additional bias.
+
+Therefore, the regularization parameter ( \lambda ) governs the trade-off between model fit and generalization ability, balancing variance reduction against bias introduction in order to improve predictive performance on unseen data.
+
+
+
+## References
+
+* R Core Team. *kappa: Compute or Estimate the Condition Number of a Matrix*. R Documentation. Available at: https://www.rdocumentation.org/packages/base/versions/3.6.2/topics/kappa
+
+* Fiveable. *Detecting Multicollinearity: VIF and Condition Number*. Available at: https://fiveable.me/linear-modeling-theory-and-applications/unit-16/detecting-multicollinearity-vif-condition-number/study-guide/MiDWzuI9sLqO8Ri8
+
+* Faraway, J. J. (2014). *Linear Models with R*. CRC Press LLC. ProQuest Ebook Central. Available at: https://ebookcentral.proquest.com/lib/bibliouocsp-ebooks/detail.action?docID=1640577
+
+* Rousseeuw, P. J., & Leroy, A. M. (1987). *Robust Regression and Outlier Detection*. Wiley.
+
+* Davison, A. C., & Hinkley, D. V. (1997). *Bootstrap Methods and Their Application*. Cambridge University Press.
+
+* Universitat de Barcelona. *Bootstrap resampling for confidence intervals in regression and LTS*. Supporting material for R courses. Available at: https://www.ub.edu/cursosR/files/bootstrap.html
+
+* Muggeo, V. M. R. (2008). *Segmented: An R Package to Fit Regression Models with Broken-Line Relationships*. *R News*, 8(1), 20–25. Available at: https://journal.r-project.org/articles/RN-2008-004
+
+* Muggeo, V. M. R. (2026). *segmented: Regression models with break-points/change-points estimation (with possibly random effects)* (Version 2.2-0). Comprehensive R Archive Network (CRAN). Available at: https://cran.r-project.org/web/packages/segmented/segmented.pdf
+
+* Lindeløv, J. (2020). *How to do "broken stick linear regression" in R?* Cross Validated, Stack Exchange. Available at: https://stats.stackexchange.com/questions/444527/how-to-do-broken-stick-linear-regression-in-r
+
+* Bhalla, D. (2015). *Error handling in R made easy*. ListenData. Available at: https://www.listendata.com/2015/08/error-handling-in-r.html
+
+* Muggeo, V. M. R. (2024). *segmented: Regression models with break-points/change-points estimation (Reference Manual).* Available at: https://www.maths.bris.ac.uk/R/web/packages/segmented/refman/segmented.html
+
+* James, G., Witten, D., Hastie, T., & Tibshirani, R. (2021). *An Introduction to Statistical Learning* (2nd ed., Chapter 10). Springer. Available at: https://doi.org/10.1007/978-1-0716-1418-1
+
+* Hastie, T., Tibshirani, R., & Simon, N. (2025). *An Introduction to glmnet (Vignette).* Comprehensive R Archive Network (CRAN). Available at: https://cran.r-project.org/web/packages/glmnet/vignettes/glmnet.pdf
+
+* Hastie, T., Tibshirani, R., & Friedman, J. (2009). *The Elements of Statistical Learning*. Springer. Available at: https://www.sas.upenn.edu/~fdiebold/NoHesitations/BookAdvanced.pdf
