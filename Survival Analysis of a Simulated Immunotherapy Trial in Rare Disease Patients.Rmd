@@ -1,0 +1,436 @@
+---
+title: "Survival Analysis of a Simulated Immunotherapy Trial in Rare Disease Patients"
+author: "Giselle Piro Martino"
+date: "2026-03-25"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, message = TRUE, warning = TRUE, error = TRUE)
+
+```
+
+
+## Survival Analysis of an Experimental Immunotherapy Treatment
+
+This study evaluates the effectiveness of a novel immunotherapy treatment in improving survival outcomes for patients affected by a rare disease. The dataset consists of survival information from a total of 10 patients divided into two treatment groups.
+
+Right-censored observations are denoted by the symbol "+".
+
+### Survival Times (months)
+
+**Treatment Group A (Novel Immunotherapy Drug):**
+
+8, 12+, 15, 19+, 22
+
+**Treatment Group B (Placebo):**
+
+4, 8, 8, 12+, 16
+
+### Objectives
+
+The following analyses are performed:
+
+* Estimate the overall Kaplan–Meier survival curve using all available observations.
+
+* Estimate separate Kaplan–Meier survival curves for the treatment and placebo groups.
+
+* Compare the survival patterns between both groups through graphical representation and descriptive interpretation.
+
+**Kaplan–Meier Survival Estimation**
+
+```{r 3a}
+
+# Overall Kaplan-Meier estimator (product-limit estimator):
+KMg <- (1 - 1/10) * (1 - 3/9) * (1 - 1/4) * (1 - 1/3) * (1 - 1/1)
+KMg
+
+# Kaplan-Meier estimator (product-limit estimator) for Group A:
+KMa <- (1 - 1/5) * (1 - 1/3) * (1 - 1/1)
+KMa
+
+# Kaplan-Meier estimator (product-limit estimator) for Group B:
+KMb <- (1 - 1/5) * (1 - 2/4) * (1 - 1/1)
+KMb
+
+
+```
+
+
+**Greenwood Variance Estimation and Confidence Intervals**
+
+The variance of the Kaplan–Meier estimator was computed using Greenwood's formula. The calculation is performed up to the penultimate observed event time:
+
+$$
+\text{Var}[\hat{S}_{KM}(t)] = \left( \hat{S}_{KM}(t) \right)^2 \sum_{f: t_f \le t} \frac{m_f}{n_f (n_f - m_f)}
+$$
+
+
+Based on the estimated variance, approximate 95% confidence intervals for the survival function were computed as:
+
+$$
+\hat{S}_{KM}(t) \pm 1.96 \sqrt{\text{Var}[\hat{S}_{KM}(t)]}
+$$
+
+
+These confidence intervals provide an estimate of the uncertainty associated with the Kaplan–Meier survival probabilities at each event time.
+
+```{r 3b}
+
+# Variance estimation and 95% confidence intervals
+
+## Variance of the overall Kaplan-Meier estimator
+varGt4 <- (1 - 1/10)^2 * (1 / (10 * (10 - 1)))
+varGt4  # Variance at time 4
+
+ICGt4lim_inf <- (1 - 1/10) - 1.96 * sqrt(varGt4)
+ICGt4lim_sup <- (1 - 1/10) + 1.96 * sqrt(varGt4)
+
+paste("95% CI:", round(ICGt4lim_inf, 2), "-", round(ICGt4lim_sup, 2))
+
+varGt8 <- ((1 - 1/10) * (1 - 3/9))^2 *
+          ((1 / (10 * (10 - 1))) + 3 / (9 * (9 - 3)))
+varGt8  # Variance at time 8
+
+ICGt8lim_inf <- ((1 - 1/10) * (1 - 3/9)) - 1.96 * sqrt(varGt8)
+ICGt8lim_sup <- ((1 - 1/10) * (1 - 3/9)) + 1.96 * sqrt(varGt8)
+
+paste("95% CI:", round(ICGt8lim_inf, 2), "-", round(ICGt8lim_sup, 2))
+
+varGt15 <- ((1 - 1/10) * (1 - 3/9) * (1 - 1/4))^2 *
+           ((1 / (10 * (10 - 1))) +
+            3 / (9 * (9 - 3)) +
+            1 / (4 * (4 - 1)))
+varGt15  # Variance at time 15
+
+ICGt15lim_inf <- ((1 - 1/10) * (1 - 3/9) * (1 - 1/4)) -
+                 1.96 * sqrt(varGt15)
+ICGt15lim_sup <- ((1 - 1/10) * (1 - 3/9) * (1 - 1/4)) +
+                 1.96 * sqrt(varGt15)
+
+paste("95% CI:", round(ICGt15lim_inf, 2), "-", round(ICGt15lim_sup, 2))
+
+varGt16 <- ((1 - 1/10) * (1 - 3/9) * (1 - 1/4) * (1 - 1/3))^2 *
+           ((1 / (10 * (10 - 1))) +
+            3 / (9 * (9 - 3)) +
+            1 / (4 * (4 - 1)) +
+            1 / (3 * (3 - 1)))
+varGt16  # Variance at time 16
+
+ICGt16lim_inf <- ((1 - 1/10) * (1 - 3/9) * (1 - 1/4) * (1 - 1/3)) -
+                 1.96 * sqrt(varGt16)
+ICGt16lim_sup <- ((1 - 1/10) * (1 - 3/9) * (1 - 1/4) * (1 - 1/3)) +
+                 1.96 * sqrt(varGt16)
+
+paste("95% CI:", round(ICGt16lim_inf, 2), "-", round(ICGt16lim_sup, 2))
+
+
+## Variance of the Kaplan-Meier estimator for Group A
+varAt8 <- (1 - 1/5)^2 * (1 / (5 * (5 - 1)))
+varAt8  # Variance at time 8
+
+ICAt8lim_inf <- (1 - 1/5) - 1.96 * sqrt(varAt8)
+ICAt8lim_sup <- (1 - 1/5) + 1.96 * sqrt(varAt8)
+
+paste("95% CI:", round(ICAt8lim_inf, 2), "-", round(ICAt8lim_sup, 2))
+
+varAt15 <- ((1 - 1/5) * (1 - 1/3))^2 *
+           ((1 / (5 * (5 - 1))) + (1 / (3 * (3 - 1))))
+varAt15  # Variance at time 15
+
+ICAt15lim_inf <- ((1 - 1/5) * (1 - 1/3)) -
+                 1.96 * sqrt(varAt15)
+ICAt15lim_sup <- ((1 - 1/5) * (1 - 1/3)) +
+                 1.96 * sqrt(varAt15)
+
+paste("95% CI:", round(ICAt15lim_inf, 2), "-", round(ICAt15lim_sup, 2))
+
+
+## Variance of the Kaplan-Meier estimator for Group B
+varBt4 <- (1 - 1/5)^2 * (1 / (5 * (5 - 1)))
+varBt4  # Variance at time 4
+
+ICBt4lim_inf <- (1 - 1/5) - 1.96 * sqrt(varBt4)
+ICBt4lim_sup <- (1 - 1/5) + 1.96 * sqrt(varBt4)
+
+paste("95% CI:", round(ICBt4lim_inf, 2), "-", round(ICBt4lim_sup, 2))
+
+varBt8 <- ((1 - 1/5) * (1 - 2/4))^2 *
+          ((1 / (5 * (5 - 1))) + (2 / (4 * (4 - 2))))
+varBt8  # Variance at time 8
+
+ICBt8lim_inf <- ((1 - 1/5) * (1 - 2/4)) -
+                1.96 * sqrt(varBt8)
+ICBt8lim_sup <- ((1 - 1/5) * (1 - 2/4)) +
+                1.96 * sqrt(varBt8)
+
+paste("95% CI:", round(ICBt8lim_inf, 2), "-", round(ICBt8lim_sup, 2))
+
+```
+
+Because survival probabilities are bounded between 0 and 1, the corresponding confidence intervals must also remain within this range. Consequently, negative lower confidence limits were set to 0, and upper confidence limits greater than 1 were truncated to 1.
+
+
+### Kaplan–Meier Survival Curves
+
+The Kaplan–Meier survival curves for both treatment groups were estimated using the `survival` package in R. Censored observations are indicated by tick marks on the corresponding survival curves.
+
+```{r 3c}
+# Install and load the survival package
+if (!require(survival)) {
+  install.packages("survival", repos = "https://cloud.r-project.org/")
+  library(survival)
+} else {
+  library(survival)
+}
+
+  
+tiempo <- c(8, 12, 15, 19, 22,   4, 8, 8, 12, 16)
+
+eventos <-c(1, 0, 1, 0, 1,    1, 1, 1, 0, 1) 1 # 1 = event (death), 0 = censored 
+
+grupo <- c(rep("A", 5), rep("B", 5)) # Treatment groups
+
+# Create the survival object
+surv_obj <- Surv(time = tiempo, event = eventos)
+
+# Fit Kaplan-Meier curves by treatment group
+fit <- survfit(surv_obj~grupo)
+
+
+# Plot survival curves
+plot(fit,
+     col = c("blue", "red"),
+     xlab = "Time (months)",
+     ylab = "Survival Probability",
+     main = "Kaplan–Meier Survival Curves",
+     mark.time = TRUE)
+
+legend("topright",
+       legend = c("Treatment", "Placebo"),
+       col = c("blue", "red"),
+       lty = 1)
+
+```
+
+### Restricted Mean Survival Time (RMST)
+
+
+```{r 3d}
+
+# Install and load the package
+if (!require(survRM2)) {
+  install.packages("survRM2", repos = "https://cloud.r-project.org/")
+  library(survRM2)
+} else {
+  library(survRM2)
+}
+
+# Binary treatment indicator for survRM2
+# (0 = Placebo group, 1 = Treatment group)
+arm <- ifelse(grupo == "A", 1, 0)
+
+
+# Choose tau = 16 months, corresponding to the largest event time
+# observed in both treatment groups
+tau <- 16  
+
+rmst_res <- rmst2(time = tiempo,
+                  status = eventos,
+                  arm = arm,
+                  tau = tau)
+
+print(rmst_res)
+
+```
+
+
+Patients receiving the experimental immunotherapy exhibited a longer restricted mean survival time (RMST) up to 16 months than those in the placebo group (14.1 vs. 10.4 months), suggesting a potential survival benefit associated with the treatment. However, this difference was not statistically significant (p = 0.144), likely due to the small sample size.
+
+
+### Log-Rank Test and Other Weighted Survival Tests
+
+The contingency table for the Log-Rank test was constructed manually to evaluate the null hypothesis of equal survival distributions between the treatment and placebo groups:
+
+\[
+H_0: S_A(t) = S_B(t)
+\]
+
+In addition, the weighted survival tests presented in Section VI of Chapter 2 of KK12 were computed using the `survMisc` package in R. The results were then compared and interpreted.
+
+| Time (months) | Events (Treatment) | Events (Placebo) | Risk Set (Treatment) | Risk Set (Placebo) | Expected (Treatment) | Expected (Placebo) | Obs − Exp (Treatment) | Obs − Exp (Placebo) |
+|--------------:|-------------------:|-----------------:|---------------------:|-------------------:|---------------------:|-------------------:|----------------------:|--------------------:|
+| 4  | 0 | 1 | 5 | 5 | 0.50 | 0.50 | -0.50 | 0.50 |
+| 8  | 1 | 2 | 5 | 4 | 1.67 | 1.33 | -0.67 | 0.67 |
+| 15 | 1 | 0 | 3 | 1 | 0.75 | 0.25 | 0.25 | -0.25 |
+| 16 | 0 | 1 | 2 | 1 | 0.67 | 0.33 | -0.67 | 0.67 |
+| 22 | 1 | 0 | 1 | 0 | 1.00 | 0.00 | 0.00 | 0.00 |
+
+
+
+```{r 3e1}
+
+# Compute the Log-Rank test statistic to assess the null hypothesis
+# of equal survival distributions (H0: SA(t) = SB(t))
+
+# OA - EA: Total observed minus expected events for the Treatment group
+Oa_Ea <- sum(-0.5, -0.67, 0.25, -0.67, 0) 
+Oa_Ea
+
+
+# OB - EB: Total observed minus expected events for the Placebo group
+Ob_Eb <- sum(0.5, 0.67, -0.25, 0.67, 0)
+Ob_Eb
+
+# Total variance
+# Var_total = sum of the variances across event times
+# Var_t = (Ra * Rb * D * (N - D)) / (N^2 * (N - 1))
+
+## Variance at time 4
+var_t4 <- (5*5*1*(10-1))/(10^2*(10-1))
+var_t4
+
+## Variance at time 8
+var_t8 <- (5*4*3*(9-3))/(9^2*(9-1))
+var_t8
+
+## Variance at time 15
+var_t15 <- (3*1*1*(4-1))/(4^2*(4-1))
+var_t15
+
+## Variance at time 16
+var_t16 <- (2*1*1*(3-1))/(3^2*(3-1))
+var_t16
+
+## Variance at time 22
+var_t22 <- 0
+
+
+# Total variance
+Var_tot <- sum(var_t4, var_t8, var_t15, var_t16, var_t22)
+Var_tot
+
+# Log-Rank test statistic
+Log_rank <- Ob_Eb^2/Var_tot
+Log_rank
+
+# Compute the p-value
+p_value <- 1 - pchisq(Log_rank, df=1)
+p_value
+
+
+```
+
+With a p-value of 0.15, there is insufficient evidence to reject the null hypothesis. Therefore, no statistically significant difference in survival distributions was observed between the treatment and placebo groups.
+
+### Results of the Weighted Survival Tests
+
+The following weighted survival tests, described in Section VI of Chapter 2 of KK12, were also performed:
+
+- Wilcoxon
+- Tarone–Ware
+- Peto
+- Fleming–Harrington
+
+```{r 3e2}
+require(survival) 
+
+# Install and load the PHInfiniteEstimates package,
+# required to perform the Wilcoxon test
+if (!require(PHInfiniteEstimates)) {
+  install.packages("PHInfiniteEstimates", repos = "https://cloud.r-project.org/")
+  library(PHInfiniteEstimates)
+} else {
+  library(PHInfiniteEstimates)
+}
+
+tiempo <- c(8, 12, 15, 19, 22,   4, 8, 8, 12, 16)
+
+eventos <-c(1, 0, 1, 0, 1,    1, 1, 1, 0, 1) # 1 = event (death), 0 = censored
+
+grupo <- c(rep("A", 5), rep("B", 5))
+
+# Create the survival object
+surv_obj <- Surv(time = tiempo, event = eventos)
+
+# Log-Rank test
+survdiff(surv_obj ~ grupo, rho = 0)
+
+# Wilcoxon test
+# Create a data frame to pass to the function
+datos <- data.frame(
+  tiempo = c(8, 12, 15, 19, 22, 4, 8, 8, 12, 16),
+  eventos = c(1, 0, 1, 0, 1, 1, 1, 1, 0, 1),  # 1 = event (death), 0 = censored
+  grupo = factor(c(rep("A", 5), rep("B", 5)))
+)
+
+
+wilcoxon <- gehan.wilcoxon.test(
+  surv_obj ~ grupo, 
+  data = datos,
+  gehan = TRUE,
+  plot = FALSE,
+  alpha = 0.05
+)
+
+print(wilcoxon)
+
+# Tarone-Ware test
+survdiff(surv_obj ~ grupo, rho = 0.5)
+
+# Peto-Peto test
+survdiff(surv_obj ~ grupo, rho = 1)
+
+
+```
+
+All survival tests produced similar results, with p-values greater than 0.05, indicating insufficient evidence to reject the null hypothesis of equal survival distributions between the treatment and placebo groups.
+
+Although each test applies a different weighting scheme to event times, they all led to the same conclusion. The Log-Rank test assigns equal weight to all event times, whereas the Wilcoxon and Tarone–Ware tests place greater emphasis on early events. The Peto–Peto test also favors early events but with a more moderate weighting. Finally, the Fleming–Harrington test provides a flexible weighting scheme that can emphasize either early or late events depending on the selected parameter values.
+
+Overall, the consistency across these tests strengthens the conclusion that there is no statistically significant difference in survival between the two groups. Although the Kaplan–Meier curves and the restricted mean survival time (RMST) suggested a trend toward improved survival in the treatment group, this evidence is insufficient to demonstrate a treatment effect, most likely because of the small sample size.
+
+**Note**
+
+A suitable implementation of the Fleming–Harrington test could not be identified for the current R environment. The packages commonly referenced in the literature (e.g., `survMisc` and `cr17`) are no longer compatible with recent versions of R. If these packages were available, the analysis could have been performed using a function of the following form:
+
+
+```{r 3e3, eval=FALSE}
+install.packages("cr17")
+library(cr17)
+
+# Fleming–Harrington test
+# rho = p and gamma = q.
+# In this example, both early and late events receive greater weight
+# by setting rho = 1 and gamma = 1.
+testSurvival(tiempo, eventos, grupo, cens = 0, rho = 1, gamma = 1)
+```
+
+Since the exercise does not specify values for the Fleming–Harrington parameters (*p* and *q*), I chose *p* = 1 and *q* = 1, assigning greater weight to both early and late differences between the survival curves.
+
+
+
+
+
+## References
+
+- Last, I. (2019, January 13). *Kaplan–Meier*. https://iagolast.github.io/blog/2019/01/13/kaplan-meier.html
+
+- Martínez, J. (n.d.). *Supervivencia*. RPubs. https://rpubs.com/JavierMtzG/Supervivencia
+
+- Cristian, A. G. R. (n.d.). *Estimación de supervivencia*. RPubs. https://rpubs.com/Cristian_AGR/1326105
+
+- DataCamp. (n.d.). *survRM2: Restricted mean survival time analysis in R*. https://www.datacamp.com/datalab/preview?_tag=rdocs&rdocsPath=packages%2FsurvRM2%2Fversions%2F1.0-4%2Ftopics%2FsurvRM2-package&utm_source=r-docs&utm_medium=docs&utm_term=survRM2-package&utm_content=run_example_in_datalab
+
+- R Core Team. (n.d.). *survRM2: Restricted mean survival time (RMST) analysis* [R package documentation]. CRAN. https://cran.r-project.org/web/packages/survRM2/survRM2.pdf
+
+- RDocumentation. (n.d.). *survdiff: Test Survival Curve Differences* (survival package). https://www.rdocumentation.org/packages/survival/versions/3.8-3/topics/survdiff
+
+- R Core Team. (n.d.). *survival: Survival Analysis* [R package documentation]. CRAN. https://cran.r-project.org/web/packages/survival/survival.pdf
+
+- RDocumentation. (n.d.). *gehan.wilcoxon.test* (PHInfiniteEstimates package). https://www.rdocumentation.org/packages/PHInfiniteEstimates/versions/2.9.5/topics/gehan.wilcoxon.test
+
+- RDocumentation. (n.d.). *FHtest-package: Tests for Right and Interval-Censored Survival Data Based on the Fleming–Harrington Class* (FHtest package). https://search.r-project.org/CRAN/refmans/FHtest/html/FHtestrcp.html
+
+- RDocumentation. (n.d.). *testSurvival* (cr17 package). https://www.rdocumentation.org/packages/cr17/versions/0.1.0/topics/testSurvival
