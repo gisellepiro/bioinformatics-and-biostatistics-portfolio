@@ -265,17 +265,6 @@ Overall:
 
 ---
 
-# Repository Structure
-
-```
-.
-├── README.md
-├── ARMD_mixed_models.Rmd
-├── figures/
-└── data/
-```
-
----
 
 # Reproducibility
 
