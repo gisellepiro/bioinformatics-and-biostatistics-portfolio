@@ -55,4 +55,4 @@ Spanish State Meteorological Agency (AEMET)
 ## Author
 
 Giselle Piro Martino
-MSc Bioinformatics and Biostatistics
+
