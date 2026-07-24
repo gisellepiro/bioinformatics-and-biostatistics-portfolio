@@ -54,15 +54,6 @@ Variables include:
 * knitr
 * readr
 
-## Repository Structure
-
-```text
-├── diabetes_analysis.Rmd
-├── diabetes_analysis.html
-├── figures/
-├── data/
-└── README.md
-```
 
 ## Data Source
 
