@@ -314,4 +314,4 @@ This project demonstrates experience with:
 
 **Giselle Piro Martino**
 
-Portfolio project focused on longitudinal statistical modeling and clinical data analysis.
+
