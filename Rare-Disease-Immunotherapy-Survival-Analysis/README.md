@@ -43,14 +43,6 @@ The project includes:
 - survRM2
 - PHInfiniteEstimates
 
-## Repository Structure
-
-```
-.
-├── survival_analysis.Rmd
-├── survival_analysis.html
-└── README.md
-```
 
 ## Notes
 
