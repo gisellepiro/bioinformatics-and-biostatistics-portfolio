@@ -1,0 +1,820 @@
+---
+title: "Multivariate Analysis of the Gut Microbiome in Type 2 Diabetes"
+author: "Giselle Piro Martino"
+date: "2026-04-20"
+output: html_document
+---
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, waring = TRUE, message = TRUE, error = TRUE)
+```
+
+
+# Gut Microbiome Analysis in Type 2 Diabetes Using Multivariate Statistics
+
+## Project Overview
+
+This project reproduces and extends the multivariate analysis performed on the gut microbiome dataset published by Qin et al. (2012), with the objective of exploring the relationship between gut microbial composition and Type 2 Diabetes (T2D).
+
+The analysis focuses on identifying differences in microbial community composition between individuals with T2D and healthy controls using exploratory and multivariate statistical methods implemented in R.
+
+### Study Objectives
+
+The analysis aims to:
+
+- Compare the gut microbiome composition between individuals with Type 2 Diabetes and healthy controls.
+- Identify bacterial species whose relative abundance differs between groups.
+- Explore microbial diversity patterns associated with T2D.
+- Evaluate the suitability of multivariate statistical techniques for characterizing microbiome data.
+
+## Dataset
+
+The data were obtained from the **curatedMetagenomicData** Bioconductor package using the dataset:
+
+`2021-10-14.QinJ_2012.relative_abundance`
+
+The original dataset contains species-level relative abundance profiles generated from shotgun metagenomic sequencing.
+
+For computational simplicity and reproducibility, this project uses a subset of 60 individuals:
+
+- 30 patients diagnosed with Type 2 Diabetes
+- 30 healthy controls
+
+## Data Preparation
+
+The dataset was prepared following these steps:
+
+1. Download the microbiome dataset from the **curatedMetagenomicData** package.
+
+2. Extract species abundance data and associated clinical metadata.
+
+3. Randomly select 30 T2D patients and 30 healthy controls using a fixed random seed (`4567`).
+
+4. Store the processed data as `QinJ_2012.RData` to ensure reproducibility throughout the analysis.
+
+
+The remaining analyses are performed using the preprocessed dataset.
+
+
+```{r Ej0, warning=FALSE, message=FALSE}
+
+# Install Bioconductor packages (run only once)
+
+install.packages("BiocManager")
+options(repos = BiocManager::repositories())
+BiocManager::install("curatedMetagenomicData")
+BiocManager::install("SummarizedExperiment")
+
+# Load required libraries
+
+library(curatedMetagenomicData)
+library(SummarizedExperiment)
+
+# Load the preprocessed dataset
+
+T2D <- load("QinJ_2012.RData")
+
+# Display the objects loaded into the workspace
+
+T2D
+
+# Explore the microbiome abundance matrix (X1)
+# Rows correspond to individuals and columns to bacterial species
+
+dim(X1)
+# Expected output:
+# 60 observations (30 T2D patients and 30 healthy controls)
+# 651 bacterial species (relative abundance)
+
+# Explore the clinical metadata
+
+head(meta)
+
+# Number of individuals included in the analysis
+
+nrow(meta)
+
+# Distribution of disease status
+
+table(meta$disease)
+# Expected output:
+# 30 healthy controls
+# 30 Type 2 Diabetes (T2D) patients
+
+```
+The `QinJ_2012.RData` file contains the preprocessed dataset used throughout this project, including the objects `X1` and `meta`.
+
+- **X1** is the microbiome abundance matrix containing relative abundances for **651 bacterial species** across **60 individuals** (30 patients with Type 2 Diabetes and 30 healthy controls).
+- **meta** contains the associated clinical metadata, including patient identifiers and disease status.
+
+## Exploratory Multivariate Analysis
+
+### Objectives
+
+The exploratory analysis includes the following steps:
+
+1. **Feature filtering**
+
+   - Retain bacterial species with a prevalence ≥ 20%.
+   
+   - Further filter species with a mean relative abundance greater than or equal to the 50th percentile.
+
+2. **Alpha diversity analysis**
+
+   - Calculate the mean species richness for each study group.
+   
+   - Calculate the mean Shannon diversity index for each group.
+
+3. **Data visualization**
+
+   - Compare species richness distributions using histograms and boxplots.
+   
+   - Visualize the 12 most abundant bacterial species.
+
+4. **Distance-based analysis**
+   - Apply a log transformation (`log(x + 1e-6)`), followed by centering and scaling.
+   - Compute Euclidean distance from the data centroid.
+   - Compute Mahalanobis distance using a robust covariance estimator.
+
+5. **Outlier detection**
+
+   - Identify the most extreme sample according to both distance metrics.
+   
+   - Compare whether both approaches identify the same observation.
+
+
+```{r Ej1}
+
+require(ggplot2)
+require(corpcor)
+
+#a
+# Prevalence ≥ 20%
+# First, calculate the prevalence of each bacterial species
+# (i.e., relative abundance > 0 across samples)
+
+prev <- apply(X1 > 0, 2, mean) # Proportion of samples in which each species is present
+prev20 <- which(prev >= 0.20)
+
+# Dataset filtered by prevalence ≥ 20%
+X1_prev20 <- X1[, prev20] # Subset containing species with prevalence ≥ 20%
+
+# Mean abundance ≥ 50th percentile (median), starting from the prevalence-filtered dataset
+# Calculate the mean abundance for each species
+
+abund_media <- colMeans(X1_prev20)
+p50 <- median(abund_media)
+X1_final <- X1_prev20[, abund_media >= p50]
+
+#b
+# Mean species richness by group
+
+grupo <- meta$disease
+riqueza <- apply(X1_final > 0, 1, sum)
+riq_mg <- tapply(riqueza, grupo, mean)
+riq_mg
+
+# Mean Shannon diversity index by group
+# Define a function to calculate the Shannon index
+
+H <- function(x) {
+  pi <- x / sum(x)
+  -sum(pi[pi > 0] * log2(pi[pi > 0]))
+}
+
+# Apply the function to each sample
+
+shannon <- apply(X1_final, 1, H)
+
+# Calculate the group means
+
+shann_mg <- tapply(shannon, grupo, mean)
+shann_mg
+
+# Histogram and boxplot of species richness by group
+
+boxplot(riqueza ~ grupo,
+        main = "Species Richness by Group",
+        xlab = "Group",
+        ylab = "Species Richness",
+        col = c("violet", "blue"))
+
+df <- data.frame(riqueza, grupo)
+
+ggplot(df, aes(x = riqueza, fill = grupo)) +
+  geom_histogram(bins = 30) +
+  facet_wrap(~grupo)
+
+#d
+# Mean abundance profile (top 12 most abundant species)
+
+# Select the 12 species with the highest mean abundance
+
+ab_media <- colMeans(X1_final)
+top12 <- names(sort(ab_media, decreasing = TRUE)[1:12])
+X_top12 <- ab_media[top12]
+
+# Bar plot
+
+par(mar = c(12, 4, 4, 2))
+max_y <- max(X_top12) * 1.3
+colores <- rainbow(12)
+
+mp <- barplot(X_top12,
+              main = "Top 12 Most Abundant Species",
+              col = colores,
+              ylab = "Mean Relative Abundance",
+              xaxt = "n",
+              ylim = c(0, max_y))
+
+legend("topright",
+       legend = names(X_top12),
+       fill = colores,
+       cex = 0.4,
+       bty = "n")
+
+#e
+# Log-transform, center, and scale the data
+
+# Log transformation
+
+X_log <- log(X1_final + 1e-6)
+
+# Centering and scaling
+
+X_tec <- scale(X_log, center = TRUE, scale = TRUE)
+
+# Euclidean distance to the centroid
+
+centro <- colMeans(X_tec)
+
+dist_e <- apply(X_tec, 1, function(x) {
+  sqrt(sum((x - centro)^2))
+})
+
+dist_e <- round(dist_e, 2)
+dist_e
+
+# Mahalanobis distance using a shrinkage covariance estimator (p > n)
+
+centro <- colMeans(X_tec)
+sigma <- cov.shrink(X_tec)
+
+dist_m <- mahalanobis(X_tec, centro, sigma)
+dist_m
+
+#f
+# Most extreme sample according to Euclidean distance
+
+which.max(dist_e)
+
+# Most extreme sample according to Mahalanobis distance
+
+which.max(dist_m)
+
+
+```
+## Results and Interpretation
+
+The mean species richness was slightly higher in the healthy control group than in the T2D group, indicating a greater average number of bacterial species among healthy individuals. However, the observed difference was small, and no conclusions regarding statistical significance can be drawn without performing a formal hypothesis test. This finding is consistent with previous evidence suggesting that certain metabolic disorders may be associated with reduced gut microbiome richness.
+
+Regarding the Shannon diversity index, the T2D group showed a slightly higher mean value (≈3.66) than the healthy control group (≈3.16). This suggests that although individuals with T2D exhibited lower species richness, the relative abundances of the detected species were more evenly distributed. These results should be interpreted with caution, as the feature filtering process may influence diversity estimates by removing low-abundance species.
+
+The graphical analysis revealed similar species richness distributions across both groups. The T2D group displayed slightly greater variability, including a few lower richness values, whereas the healthy group showed a more concentrated distribution around intermediate values.
+
+The boxplot supported these observations, with comparable median richness values in both groups. Although the T2D group exhibited slightly higher variability, no substantial differences in central tendency or evidence of extreme outliers were observed.
+
+Overall, the exploratory analysis did not reveal clear differences in species richness between the two groups. Formal statistical testing would be required to determine whether the observed differences are statistically significant.
+
+The sample **T2D-100** was identified as the most extreme observation using both the Euclidean and Mahalanobis distance metrics. This indicates that its microbial profile differs substantially from the remaining samples, both in terms of its overall distance from the data centroid and when accounting for the covariance structure of the variables.
+
+While the Euclidean distance measures the direct geometric distance between observations, the Mahalanobis distance accounts for correlations among variables by incorporating the covariance matrix. The fact that both methods identified the same sample as the most extreme provides strong evidence that **T2D-100** represents a genuine multivariate outlier.
+
+---
+
+## Principal Component Analysis (PCA)
+
+The next step of the analysis consists of performing a Principal Component Analysis (PCA) on the log-transformed, centered, and scaled microbiome data.
+
+The objectives of this analysis are:
+
+1. Compute the principal components using the preprocessed data.
+
+2. Examine the explained variance using a scree plot.
+
+3. Select the optimal number of principal components using at least two selection criteria.
+
+4. Interpret the first two principal components based on the variables with the highest loadings.
+
+5. Visualize sample clustering according to disease status and identify potential outliers.
+
+6. Remove the sample previously identified as the largest Mahalanobis outlier (**T2D-100**) and repeat the PCA to evaluate whether the overall data structure or group separation changes.
+
+
+```{r Ej2}
+library(factoextra)
+
+# Perform PCA on the log-transformed, centered, and scaled data
+# (No additional centering or scaling is required)
+
+pca <- prcomp(X_tec, center = FALSE, scale. = FALSE)
+summary(pca)
+
+# Scree plot showing the proportion of explained variance
+
+fviz_eig(pca)
+
+# Select principal components using the Kaiser criterion
+# (Retain components with eigenvalues > 1)
+
+which(pca$sdev^2 > 1)
+
+# Identify the variables with the largest loadings for PC1
+
+PC1 <- sort(abs(pca$rotation[, 1]), decreasing = TRUE)
+
+head(PC1, 10) # Top 10 variables contributing to PC1
+
+# Identify the variables with the largest loadings for PC2
+
+PC2 <- sort(abs(pca$rotation[, 2]), decreasing = TRUE)
+
+head(PC2, 10) # Top 10 variables contributing to PC2
+
+# PCA score plot colored by disease group
+
+fviz_pca_ind(pca,
+             geom = c("point", "text"),
+             habillage = grupo,
+             palette = c("#3B5998", "#CC0000"),
+             pointsize = 2,
+             labelsize = 2,
+             alpha.ind = 0.7,
+             addEllipses = FALSE,
+             repel = TRUE)
+
+# Remove the multivariate outlier identified using Mahalanobis distance
+# (Sample: T2D-100)
+
+X_sin_outlier <- X_tec[rownames(X_tec) != "T2D-100", ]
+
+# Repeat the PCA after removing the outlier
+
+pca_sin_outlier <- prcomp(X_sin_outlier, center = FALSE, scale. = FALSE)
+summary(pca_sin_outlier)
+
+# Scree plot after outlier removal
+
+fviz_eig(pca_sin_outlier)
+
+# PCA score plot after outlier removal
+
+grupo_sin_outlier <- grupo[rownames(X_tec) != "T2D-100"]
+
+fviz_pca_ind(pca_sin_outlier,
+             geom = c("point", "text"),
+             habillage = grupo_sin_outlier,
+             palette = c("#3B5998", "#CC0000"),
+             pointsize = 2,
+             labelsize = 2,
+             alpha.ind = 0.7,
+             addEllipses = FALSE,
+             repel = TRUE)
+
+```
+
+## Results and Interpretation
+
+### Principal Component Selection
+
+Three complementary criteria were used to determine the appropriate number of principal components to retain.
+
+#### Criterion 1: Cumulative Explained Variance
+
+A common approach is to retain enough principal components to explain approximately **80% of the cumulative variance**.
+
+According to the PCA summary, the first **21 principal components** explain approximately 80% of the total variance. Based on this criterion, a minimum of **21 components** would be retained.
+
+#### Criterion 2: Scree Plot
+
+The scree plot identifies the point where the slope of the explained variance curve changes markedly (the *elbow*), indicating that subsequent components contribute relatively little additional information.
+
+In this analysis, the elbow appears between **PC3 and PC4**, suggesting that the first **four principal components** capture most of the meaningful variation.
+
+Additionally, the curve becomes nearly flat after approximately **PC8**, indicating that retaining between **4 and 8 principal components** may provide a reasonable balance between information retention and model simplicity.
+
+#### Criterion 3: Kaiser Criterion
+
+According to the Kaiser criterion, principal components with **eigenvalues greater than 1** should be retained.
+
+Applying this criterion results in the selection of the first **22 principal components**. As commonly reported in the literature, the Kaiser criterion tends to overestimate the optimal number of components.
+
+### Selected Number of Components
+
+The three selection criteria produced different recommendations. To achieve a balance between maximizing explained variance and maintaining model parsimony, **seven principal components** were retained. This choice corresponds to the transition region where additional components contribute only marginal gains in explained variance.
+
+### Interpretation of the First Two Principal Components
+
+The first principal component (PC1) is primarily driven by bacterial species belonging to the **Firmicutes** phylum, particularly members of the **Clostridia** class. Genera such as *Blautia*, *Dorea*, *Eubacterium*, and *Roseburia* exhibit the highest loadings on this component. Smaller contributions are also observed from members of the **Bacteroidetes** phylum (e.g., *Butyricimonas*) and the **Erysipelotrichia** class.
+
+Overall, PC1 appears to represent variation associated predominantly with a relatively homogeneous group of Firmicutes species.
+
+The second principal component (PC2) exhibits a more balanced taxonomic composition. Although several Firmicutes species, particularly from the **Clostridiales** order and the **Ruminococcaceae** and **Lachnospiraceae** families, contribute substantially to this component, important contributions are also observed from members of the **Bacteroidetes** phylum, especially species belonging to the *Bacteroides* and *Parabacteroides* genera.
+
+Unlike PC1, PC2 therefore reflects variation shared across both major bacterial phyla rather than being dominated by a single taxonomic group.
+
+### PCA Visualization
+
+The PCA score plot does not show a clear separation between healthy controls and individuals with Type 2 Diabetes, as the two groups largely overlap. However, a slight trend is observed along the second principal component (PC2), where healthy individuals tend to cluster at lower PC2 values while T2D patients are more frequently located at higher values.
+
+This pattern is relatively weak and does not provide clear discrimination between disease groups. No evident separation is observed along PC1, suggesting that differences in gut microbiome composition between healthy individuals and T2D patients are subtle.
+
+The PCA score plot identifies sample **CON-061** as a potential outlier because it is clearly separated from the remaining observations, particularly along PC2.
+
+Interestingly, this differs from the multivariate distance analysis, where **T2D-100** was identified as the most extreme observation based on both Euclidean and Mahalanobis distances.
+
+This apparent discrepancy is expected because the two approaches evaluate outlying observations differently. PCA projects the data into a lower-dimensional space that captures the dominant sources of variation, allowing some observations to appear visually separated even if they are not globally the most distant samples. In contrast, Euclidean and Mahalanobis distances quantify the overall distance across the complete feature space, accounting for all variables simultaneously.
+
+### Effect of Outlier Removal
+
+After removing sample **T2D-100** and repeating the PCA, no substantial changes were observed in the overall structure of the data.
+
+The proportion of explained variance remained nearly identical, and the scree plot showed no meaningful differences compared with the original analysis.
+
+Similarly, the PCA score plot displayed a comparable distribution of samples, with no appreciable improvement in the separation between healthy controls and individuals with Type 2 Diabetes. These results indicate that the multivariate outlier had little influence on the overall PCA structure.
+
+---
+
+## Non-metric Multidimensional Scaling (NMDS)
+
+The next stage of the analysis consists of performing **Kruskal's Non-metric Multidimensional Scaling (NMDS)** using the **Bray–Curtis dissimilarity** computed from the filtered microbiome abundance data without log transformation or scaling.
+
+The objectives of this analysis are:
+
+1. Perform NMDS using both two- and three-dimensional solutions.
+
+2. Evaluate model fit by generating scree plots for solutions ranging from two to six dimensions.
+
+3. Assess the goodness-of-fit of the two-dimensional solution using a Shepard diagram.
+
+4. Visualize the two-dimensional NMDS configuration and compare it with the PCA results.
+
+5. Repeat the two-dimensional NMDS after removing the Mahalanobis outlier (**T2D-100**) and qualitatively evaluate any changes in the ordination.
+
+```{r Ej3}
+install.packages("goeveg")
+
+library(goeveg)
+library(MASS)
+library(vegan)
+
+# Perform Kruskal's Non-metric Multidimensional Scaling (NMDS)
+# using Bray-Curtis dissimilarity
+
+data.dist <- vegdist(X1_final, "bray")
+
+# Two-dimensional NMDS solution
+
+nmds_2d <- isoMDS(data.dist, k = 2, trace = FALSE)
+
+# Stress value
+
+nmds_2d$stress
+
+# Two-dimensional NMDS ordination plot
+
+plot(nmds_2d$points[,1], nmds_2d$points[,2],
+     type = "n",
+     xlab = "NMDS1",
+     ylab = "NMDS2")
+
+text(nmds_2d$points[,1], nmds_2d$points[,2],
+     labels = rownames(X1_final),
+     cex = 0.3)
+
+# Three-dimensional NMDS solution
+
+nmds_3d <- isoMDS(data.dist, k = 3, trace = FALSE)
+
+# Stress value
+
+nmds_3d$stress
+
+# Three-dimensional NMDS ordination
+# (displaying the first two dimensions)
+
+plot(nmds_3d$points[,1], nmds_3d$points[,2],
+     type = "n",
+     xlab = "NMDS1",
+     ylab = "NMDS2")
+
+text(nmds_3d$points[,1], nmds_3d$points[,2],
+     labels = rownames(X1_final),
+     cex = 0.3)
+
+# Compute stress values for NMDS solutions
+# ranging from 2 to 6 dimensions
+
+k_vals <- 2:6
+stress_vals <- numeric(length(k_vals))
+
+for (i in seq_along(k_vals)) {
+
+  k <- k_vals[i]
+
+  nmds <- metaMDS(X1_final,
+                  distance = "bray",
+                  k = k,
+                  trace = FALSE)
+
+  stress_vals[i] <- nmds$stress
+}
+
+# Stress by Number of Dimensions
+
+plot(k_vals,
+     stress_vals,
+     type = "b",
+     pch = 19,
+     xlab = "Number of Dimensions",
+     ylab = "Stress",
+     main = "Stress by Number of Dimensions")
+
+# Two-dimensional NMDS colored by disease group
+
+colores <- as.factor(grupo)
+
+cols <- adjustcolor(c("#3B5998", "#CC0000"), alpha.f = 0.4)
+
+plot(nmds_2d$points[,1], nmds_2d$points[,2],
+     type = "n",
+     xlab = "NMDS1",
+     ylab = "NMDS2")
+
+abline(h = 0, lty = 2)
+abline(v = 0, lty = 2)
+
+points(nmds_2d$points[,1], nmds_2d$points[,2],
+       col = cols[colores],
+       pch = 19)
+
+text(nmds_2d$points[,1], nmds_2d$points[,2],
+     labels = rownames(X1_final),
+     cex = 0.3)
+
+legend("topright",
+       legend = levels(colores),
+       col = cols,
+       pch = 19,
+       bty = "n")
+
+# Repeat the two-dimensional NMDS after removing
+# the Mahalanobis outlier (T2D-100)
+
+X1_sin_outlier <- X1_final[rownames(X1_final) != "T2D-100", ]
+
+data.dist. <- vegdist(X1_sin_outlier, "bray")
+
+nmds_2d. <- isoMDS(data.dist., k = 2, trace = FALSE)
+
+colores <- as.factor(grupo)
+
+cols <- adjustcolor(c("#3B5998", "#CC0000"), alpha.f = 0.4)
+
+plot(nmds_2d.$points[,1], nmds_2d.$points[,2],
+     type = "n",
+     xlab = "NMDS1",
+     ylab = "NMDS2")
+
+abline(h = 0, lty = 2)
+abline(v = 0, lty = 2)
+
+points(nmds_2d.$points[,1], nmds_2d.$points[,2],
+       col = cols[colores],
+       pch = 19)
+
+text(nmds_2d.$points[,1], nmds_2d.$points[,2],
+     labels = rownames(X1_sin_outlier),
+     cex = 0.3)
+
+legend("topright",
+       legend = levels(colores),
+       col = cols,
+       pch = 19,
+       bty = "n")
+```
+
+
+## Results and Interpretation
+
+The scree plot shows that the stress value decreases as the number of dimensions increases, with the largest reduction occurring between the two- and three-dimensional solutions. Beyond three dimensions, the improvement becomes more gradual.
+
+As a general guideline, stress values close to **0.10** indicate a good representation of the data, whereas values around **0.20** suggest a less reliable ordination. In this analysis, the four-dimensional solution achieves a stress value of approximately **0.12**, indicating an acceptable fit.
+
+Although increasing the solution to five dimensions further reduces the stress (approximately **0.10**), the improvement is relatively small compared with the additional model complexity. Therefore, the **four-dimensional solution** provides a reasonable compromise between goodness of fit and model parsimony.
+
+### Comparison between PCA and NMDS
+
+The two-dimensional PCA and NMDS ordinations provide complementary views of the microbiome data because they optimize different criteria.
+
+PCA summarizes the directions of maximum variance in the original variables, whereas NMDS seeks to preserve the rank order of pairwise dissimilarities between observations based on the Bray–Curtis distance.
+
+In the PCA ordination, sample **CON-061** (healthy control) appears clearly separated from the remaining observations and contributes substantially to the variance captured by the first principal components. In PCA, an observation is considered influential when it exhibits extreme values in variables that strongly contribute to the principal components. This does not necessarily imply that it is the most dissimilar sample overall, but rather that it has a large influence on the variance structure of the dataset.
+
+In contrast, NMDS provides a more flexible representation of the data by preserving the relative dissimilarities among observations instead of maximizing explained variance. Consequently, samples that are globally different from the rest of the dataset tend to appear as isolated points in the ordination.
+
+The NMDS ordination identifies **T2D-100** as a clearly separated sample, consistent with the previous Mahalanobis distance analysis. In addition, sample **NLM027** (healthy control) also appears as a highly distinct observation, even more distant than **T2D-100** in the two-dimensional NMDS configuration.
+
+As observed in the PCA, no clear separation is evident between healthy controls and individuals with Type 2 Diabetes. This finding suggests that within-group variability is relatively high and that disease status alone does not fully explain the multivariate structure of the gut microbiome.
+
+Overall, PCA and NMDS provide complementary representations of the same dataset, with the observed differences arising from the distinct optimization criteria underlying each method.
+
+### Effect of Outlier Removal
+
+After removing the Mahalanobis outlier (**T2D-100**) and repeating the two-dimensional NMDS, only minor changes were observed in the ordination.
+
+The overall structure of the data remained largely unchanged, indicating that the similarity relationships among samples are not driven exclusively by this extreme observation.
+
+Likewise, the degree of overlap between healthy controls and individuals with Type 2 Diabetes remained essentially unchanged, suggesting that the observed ordination pattern is robust to the removal of the multivariate outlier.
+
+Overall, these results indicate that although extreme observations may slightly influence the spatial arrangement of samples, the global NMDS structure remains stable, reinforcing the consistency of the patterns identified in the original analysis.
+
+---
+
+## Correspondence Analysis
+
+The final analysis consists of performing a **Correspondence Analysis (CA)** on the contingency table **Tg**, which summarizes the relationship between **disease status** and **bacterial phylum** based on the MetaPhlAn taxonomic annotations.
+
+The objectives of this analysis are:
+
+1. Perform a complete correspondence analysis of the contingency table.
+
+2. Examine eigenvalues and the proportion of explained inertia.
+
+3. Interpret the row and column profiles.
+
+4. Visualize the relationships between disease groups and bacterial phyla using an appropriate correspondence analysis biplot.
+
+
+```{r Ej4}
+library(FactoMineR)
+
+# Inspect the contingency table
+
+str(Tg)
+
+# Perform Correspondence Analysis (CA)
+
+Tg.ca <- CA(Tg, graph = FALSE)
+Tg.ca
+
+# Eigenvalues and explained inertia
+
+Tg.ca$eig
+
+# Compute column profiles
+
+prof_col <- prop.table(as.matrix(Tg), 2)
+prof_col
+
+# Bar plot of column profiles
+
+barplot(t(prof_col),
+        beside = TRUE,
+        col = rainbow(ncol(prof_col)),
+        legend.text = colnames(prof_col),
+        args.legend = list(x = "top", cex = 0.7),
+        ylab = "Proportion",
+        main = "Column Profiles by Disease Group and Phylum")
+
+# One-dimensional Correspondence Analysis plot
+
+row <- Tg.ca$row$coord
+col <- Tg.ca$col$coord[,1]
+
+cols <- rainbow(length(col)) # Colors assigned to each phylum
+
+# Plot phyla coordinates
+
+plot(col,
+     rep(0, length(col)),
+     pch = 19,
+     col = cols,
+     xlab = "Dimension 1",
+     ylab = "",
+     yaxt = "n",
+     xlim = c(-0.5, 0.9))
+
+# Add disease groups
+
+points(row,
+       rep(0, length(row)),
+       pch = c(0, 1),
+       col = "black",
+       cex = 1.2)
+
+abline(h = 0, lty = 3, col = "gray")
+
+# Legend for phyla
+
+legend("top",
+       legend = colnames(Tg),
+       col = cols,
+       pch = 19,
+       horiz = TRUE,
+       bty = "n",
+       cex = 0.7)
+
+# Legend for disease groups
+
+legend("bottomright",
+       legend = rownames(Tg),
+       pch = c(0, 1),
+       col = "black",
+       bty = "n")
+
+```
+
+## Results and Interpretation
+
+The Correspondence Analysis (CA) produced a single dimension because the contingency table contains only two rows (healthy and T2D). Consequently, this dimension explains **100% of the total inertia**.
+
+The chi-square test of independence (**χ² = 114.98; p = 3.63 × 10⁻²³**) indicates a statistically significant association between disease status and bacterial phylum composition. This result suggests that the distribution of bacterial phyla differs significantly between healthy individuals and patients with Type 2 Diabetes.
+
+The eigenvalue (**0.0204**) represents the inertia explained by the correspondence analysis dimension. In this case, approximately **2% of the deviation from independence** is captured by the first dimension.
+
+The column profile bar plot highlights clear compositional differences between the two groups. In particular, the relative abundances of **Synergistetes, Actinobacteria,** and **Fusobacteria** are considerably higher in the T2D group. Individuals with Type 2 Diabetes also exhibit a higher proportion of **Firmicutes**, whereas **Bacteroidetes** and **Proteobacteria** are relatively more abundant in healthy controls.
+
+The one-dimensional correspondence analysis plot provides a visual interpretation of these associations. Phyla located on the left side of the first dimension are more strongly associated with healthy individuals, whereas those positioned on the right are associated with Type 2 Diabetes. Specifically, **Proteobacteria** and **Bacteroidetes** are associated with the healthy group, while **Firmicutes, Fusobacteria, Actinobacteria,** and **Synergistetes** are associated with the T2D group.
+
+These findings are consistent with the patterns observed in the column profile analysis.
+
+---
+
+## Comparison with the Original Study
+
+The analysis performed on the balanced subset of 60 individuals did not reveal a clear separation between patients with Type 2 Diabetes and healthy controls, as substantial overlap was observed in both the PCA and NMDS ordinations. Species richness was slightly higher among healthy individuals, whereas the Shannon diversity index was marginally higher in the T2D group, although neither metric showed marked differences between groups.
+
+At the phylum level, however, Correspondence Analysis revealed compositional differences, with **Synergistetes, Actinobacteria, Fusobacteria,** and **Firmicutes** being relatively more abundant in the T2D group, while **Bacteroidetes** and **Proteobacteria** were more prevalent among healthy controls. These findings suggest that microbial differences exist but are not sufficiently pronounced to produce a clear global separation in multivariate space.
+
+The original study, based on a metagenome-wide association study (MGWAS) including 345 individuals, reported a moderate gut dysbiosis characterized by reduced butyrate-producing bacteria and increased opportunistic microorganisms in patients with Type 2 Diabetes. Overall, the results obtained in this project are qualitatively consistent with the general conclusions of the original publication, supporting the presence of subtle microbiome alterations accompanied by substantial inter-individual variability.
+
+---
+
+## Conceptual Questions
+
+### (a) Why is Bray–Curtis dissimilarity generally more appropriate than Euclidean distance for microbiome profiles?
+
+Bray–Curtis dissimilarity is generally preferred for microbiome abundance data because these datasets are typically sparse, high-dimensional, and contain many zero values. Euclidean distance measures only geometric differences between abundance vectors and does not account for the ecological characteristics of community data, often producing misleading similarity estimates. In contrast, Bray–Curtis emphasizes differences in species abundances while giving greater weight to dominant taxa, making it better suited for comparing microbial communities with highly skewed abundance distributions.
+
+### (b) What is an important statistical limitation of applying PCA directly to compositional data?
+
+Compositional data are constrained by a constant-sum property (e.g., relative abundances sum to 1), which induces spurious correlations among variables. Standard PCA assumes that variables vary freely within Euclidean space, an assumption violated by compositional data. As a result, the principal components may primarily reflect the mathematical constraint rather than the underlying biological structure, and the covariance matrix may become singular. For this reason, compositional datasets should ideally be transformed using log-ratio approaches, such as the centered log-ratio (CLR) or isometric log-ratio (ILR) transformation, before performing PCA.
+
+---
+
+## Conclusions
+
+The multivariate analysis of the balanced microbiome dataset (30 healthy controls and 30 individuals with Type 2 Diabetes) revealed subtle differences between the two groups, with substantial overlap in the multivariate space. Diversity metrics indicated slightly higher species richness in healthy controls, whereas the Shannon diversity index was marginally higher in the T2D group, although neither metric showed strong group separation.
+
+The PCA showed that the first principal component was primarily associated with variation in **Firmicutes** (particularly members of the **Clostridia** class), while the second component reflected variation shared between **Firmicutes** and **Bacteroidetes**, producing only limited separation between disease groups. Similarly, the NMDS based on Bray–Curtis dissimilarity confirmed the absence of distinct clusters and highlighted considerable within-group variability.
+
+Both PCA and NMDS produced robust results, as the overall ordination remained essentially unchanged after removing the multivariate outlier. In contrast, Correspondence Analysis identified significant differences in phylum composition, with higher relative abundances of **Firmicutes, Actinobacteria,** and **Fusobacteria** in the T2D group, and higher proportions of **Bacteroidetes** and **Proteobacteria** among healthy controls.
+
+Overall, the findings support the presence of a moderate gut dysbiosis associated with Type 2 Diabetes, consistent with previous studies, although these differences are not sufficiently strong to produce a clear global separation between groups. Important limitations of this analysis include the compositional nature of microbiome data, the high dimensionality of the dataset, the filtering of low-abundance species, and the influence of the chosen dissimilarity metric, with Bray–Curtis providing a more appropriate representation of ecological community differences than Euclidean distance.
+
+
+
+
+## References
+
+### Primary Literature
+
+- Qin, J., Li, Y., Cai, Z., et al. (2012). *A metagenome-wide association study of gut microbiota in type 2 diabetes*. Nature, 490(7418), 55–60. https://doi.org/10.1038/nature11450
+
+- Greenacre, M. (2007). *Correspondence Analysis in Practice* (2nd ed.). Chapman & Hall/CRC.
+
+- Jolliffe, I. T. (2002). *Principal Component Analysis* (2nd ed.). Springer.
+
+### R Documentation
+
+- corpcor package: `cov.shrink()`
+
+- robustbase package: `covMcd()`
+
+- FactoMineR package
+
+- vegan package
+
+- goeveg package
+
+- factoextra package
+
+### Additional Resources
+
+- Hands-On Machine Learning with R (PCA chapter)
+
+- STHDA: PCA visualization in R
+
+- Freie Universität Berlin – PCA component selection
