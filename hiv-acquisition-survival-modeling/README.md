@@ -91,5 +91,3 @@ Available variables included:
 ## Author
 
 Giselle Piro Martino
-
-MSc Bioinformatics and Biostatistics
